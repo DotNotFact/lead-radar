@@ -178,6 +178,14 @@ feedparser, SQLite + aiosqlite, APScheduler, pydantic-settings, pytest + pytest-
   `TELEGRAM_API_ID`/`CHANNEL_ID`); в Фазе 5 новых живых багов не найдено — `/export` и `/stats`
   проверены только через unit-тесты с фейковыми `Message`, не через реальный Telegram (тот же
   сетевой блок `api.telegram.org`, что и в Фазах 2-3).
+- **Постфактум (после Фазы 5, по прямой просьбе владельца):** `scripts/setup_bot.py` -
+  разовая настройка профиля бота в Telegram (команды, описание, короткое описание) через
+  `bot.set_my_commands/set_my_description/set_my_short_description`; ничего не отправляет в
+  чаты, меняет только метаданные бота. Не может быть выполнен из песочницы (тот же сетевой блок
+  `api.telegram.org`) - владельцу нужно запустить один раз. `README.md` в корне - пользовательская
+  инструкция (в отличие от этого файла, который для меня). `setup.ps1`/`run.ps1` в корне -
+  обёртки первого запуска и обычного запуска для человека без запоминания команд.
+  107 тестов, `mypy --strict` чист.
 
 ## КОМАНДЫ БОТА
 
@@ -187,18 +195,26 @@ feedparser, SQLite + aiosqlite, APScheduler, pydantic-settings, pytest + pytest-
 
 ## ЗАПУСК
 
+Пользовательский путь (README.md) — `.\setup.ps1`, заполнить `.env`, `.\run.ps1` из корня
+проекта. Ниже — эквивалентные команды напрямую:
+
 Разовые прогоны источников (для проверки/наполнения БД до первого полного запуска):
 ```
 python -m scripts.collect_hh
 python -m scripts.collect_rss
 python -m scripts.collect_kwork
 ```
+Настройка профиля бота в Telegram (команды, описание, короткое описание — один раз):
+```
+python -m scripts.setup_bot
+```
 Полный процесс (планировщик + Telegram + бот) — после заполнения `.env`:
 ```
 python -m src.main
 ```
 Автозапуск: `scripts\install_windows_task.ps1` (Windows) или `scripts/lead-radar.service`
-(Linux, шаблон).
+(Linux, шаблон). `setup.ps1`/`run.ps1` в корне — обёртки для человека, не трогать логику
+внутри `scripts/` и `src/`.
 
 ### Что нужно заполнить в `.env` перед первым полным запуском
 - `BOT_TOKEN` — уже заполнен.
