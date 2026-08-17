@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import asyncio
 
-from aiogram import Bot
 from aiogram.types import BotCommand
 
+from src.control.bot_factory import build_bot
 from src.core.config import get_settings
 
 COMMANDS = [
@@ -59,7 +59,7 @@ async def main() -> None:
         print("BOT_TOKEN не задан в .env")
         return
 
-    bot = Bot(token=settings.bot_token)
+    bot = build_bot(settings)
     try:
         await bot.set_my_commands(COMMANDS)
         await bot.set_my_description(DESCRIPTION)

@@ -28,14 +28,16 @@ from scripts.sync_hh_applications import sync_hh_applications
 from src.actions.brief import compose_daily_brief
 from src.actions.materializer import materialize_due_actions
 from src.collectors.telegram import TelegramCollector
-from src.control.dispatcher import build_dispatcher
+from src.control.bot_factory import build_bot
 from src.control.chat_config import load_runtime_chats
+from src.control.dispatcher import build_dispatcher
 from src.core import repository
 from src.core.config import Settings, get_settings
 from src.core.db import apply_migrations, get_connection
 from src.core.logging_config import log_source_degraded, setup_logging
 from src.core.models import RawLead
 from src.core.pipeline import score_and_store_lead
+from src.core.proxy import parse_telethon_proxy
 from src.core.retry import retry_with_backoff
 from src.core.runtime_settings import get_score_threshold
 from src.core.yaml_config import (
@@ -151,8 +153,12 @@ async def _start_telegram(settings: Settings, telegram_config: SourceConfig, key
     поэтому не может быть проверено автоматически."""
     from telethon import TelegramClient
 
+    proxy = parse_telethon_proxy(settings.telegram_proxy_url)
     client = TelegramClient(
-        settings.telegram_session_name, settings.telegram_api_id, settings.telegram_api_hash
+        settings.telegram_session_name,
+        settings.telegram_api_id,
+        settings.telegram_api_hash,
+        proxy=proxy,
     )
     await client.start()
 
@@ -205,7 +211,7 @@ async def main() -> None:
         print("BOT_TOKEN не задан в .env - управляющий бот не может стартовать.")
         return
 
-    bot = Bot(token=settings.bot_token)
+    bot = build_bot(settings)
     dispatcher = build_dispatcher()
     scheduler = AsyncIOScheduler()
 

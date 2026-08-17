@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     telegram_api_hash: str | None = Field(default=None)
     telegram_session_name: str = Field(default="lead_radar_collector")
     channel_id: int | None = Field(default=None)
+    # Локальный прокси для доступа к Telegram (api.telegram.org), если он заблокирован
+    # напрямую - частая ситуация. httpx (hh.ru/Kwork/RSS) сам читает HTTP_PROXY/HTTPS_PROXY
+    # из окружения, а aiohttp (aiogram/бот) - нет, поэтому для бота прокси нужно прописать явно.
+    telegram_proxy_url: str = Field(default="")
 
     hh_client_id: str = Field(default="")
     hh_client_secret: str = Field(default="")
