@@ -52,6 +52,38 @@ def load_keywords_config(config_dir: Path) -> KeywordsConfig:
     return KeywordsConfig.model_validate(data)
 
 
+class RecurringActionTemplate(BaseModel):
+    title: str
+    recurrence: str
+    priority: int
+    expected_value: str | None = None
+
+
+class SeasonalActionTemplate(BaseModel):
+    title: str
+    activate_on: str  # "MM-DD"
+    priority: int
+
+
+class OneOffActionTemplate(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    title: str
+    due_date: str | None = None
+    priority: int
+
+
+class ActionsConfig(BaseModel):
+    recurring: list[RecurringActionTemplate] = []
+    seasonal: list[SeasonalActionTemplate] = []
+    one_off: list[OneOffActionTemplate] = []
+
+
+def load_actions_config(config_dir: Path) -> ActionsConfig:
+    data = _load_yaml(config_dir / "actions.yaml")
+    return ActionsConfig.model_validate(data)
+
+
 def _load_yaml(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as f:
         loaded: dict[str, Any] = yaml.safe_load(f)

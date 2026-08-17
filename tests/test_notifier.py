@@ -10,7 +10,7 @@ from src.core.db import apply_migrations, get_connection
 from src.core.models import Lead
 from src.notifier.formatter import format_lead_message
 from src.notifier.keyboard import build_lead_keyboard
-from src.notifier.notifier import send_lead_notification
+from src.notifier.notifier import notify_pending_leads, send_lead_notification
 
 MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 
@@ -75,3 +75,40 @@ async def test_send_lead_notification_calls_bot_and_records_notified(tmp_path: P
     await conn.close()
     assert outcome is not None
     assert outcome.notified_at is not None
+
+
+@pytest.mark.asyncio
+async def test_notify_pending_leads_sends_only_leads_above_threshold_once(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    await apply_migrations(db_path, MIGRATIONS_DIR)
+    conn = await get_connection(db_path)
+    await repository.ensure_source(conn, "hh_ru", 1)
+    await repository.insert_lead(conn, Lead(source_id="hh_ru", external_id="1", score=90))
+    await repository.insert_lead(conn, Lead(source_id="hh_ru", external_id="2", score=10))
+
+    fake_bot = AsyncMock()
+    sent_first = await notify_pending_leads(fake_bot, channel_id=-100123, conn=conn, threshold=50)
+    sent_second = await notify_pending_leads(fake_bot, channel_id=-100123, conn=conn, threshold=50)
+    await conn.close()
+
+    assert sent_first == 1  # только тот, что выше порога
+    assert fake_bot.send_message.call_count == 1
+    assert sent_second == 0  # уже отправлен, повторно не шлём
+
+
+@pytest.mark.asyncio
+async def test_notify_pending_leads_degrades_on_single_send_failure(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    await apply_migrations(db_path, MIGRATIONS_DIR)
+    conn = await get_connection(db_path)
+    await repository.ensure_source(conn, "hh_ru", 1)
+    await repository.insert_lead(conn, Lead(source_id="hh_ru", external_id="1", score=90))
+    await repository.insert_lead(conn, Lead(source_id="hh_ru", external_id="2", score=95))
+
+    fake_bot = AsyncMock()
+    fake_bot.send_message.side_effect = [RuntimeError("network blip"), None]
+
+    sent = await notify_pending_leads(fake_bot, channel_id=-100123, conn=conn, threshold=50)
+    await conn.close()
+
+    assert sent == 1  # второй лид всё равно отправлен, несмотря на сбой первого

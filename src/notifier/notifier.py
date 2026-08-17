@@ -29,3 +29,20 @@ async def send_lead_notification(
     )
     await repository.record_notified(conn, lead.id)
     logger.info("lead_notified", extra={"lead_id": lead.id, "source_id": lead.source_id})
+
+
+async def notify_pending_leads(
+    bot: Bot, channel_id: int, conn: aiosqlite.Connection, threshold: float, limit: int = 50
+) -> int:
+    """Отправляет все ещё не отправленные лиды выше порога. Вызывается периодически из
+    планировщика (src/main.py). Ошибка на одном лиде не должна останавливать остальные —
+    деградация вместо падения (инвариант 6)."""
+    leads = await repository.get_unnotified_leads_above_threshold(conn, threshold, limit)
+    sent = 0
+    for lead in leads:
+        try:
+            await send_lead_notification(bot, channel_id, lead, conn)
+            sent += 1
+        except Exception:
+            logger.exception("lead_notification_failed", extra={"lead_id": lead.id})
+    return sent

@@ -1,11 +1,33 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from typing import Any
 
 import aiosqlite
 
-from src.core.models import Lead, LeadOutcome, Outcome
+from src.core.models import Action, Lead, LeadOutcome, Outcome
+
+_ACTION_COLUMNS = (
+    "id, title, description, priority, due_date, recurrence, status, created_at, "
+    "completed_at, snooze_count, expected_value"
+)
+
+
+def _row_to_action(row: aiosqlite.Row) -> Action:
+    return Action(
+        id=row["id"],
+        title=row["title"],
+        description=row["description"],
+        priority=row["priority"],
+        due_date=date.fromisoformat(row["due_date"]) if row["due_date"] else None,
+        recurrence=row["recurrence"],
+        status=row["status"],
+        created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else None,
+        completed_at=datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None,
+        snooze_count=row["snooze_count"],
+        expected_value=row["expected_value"],
+    )
 
 _LEAD_COLUMNS = (
     "id, source_id, external_id, url, title, text, published_at, collected_at, "
@@ -217,6 +239,141 @@ async def set_system_state(conn: aiosqlite.Connection, key: str, value: str) -> 
         (key, value),
     )
     await conn.commit()
+
+
+async def get_latest_action_by_title(conn: aiosqlite.Connection, title: str) -> Action | None:
+    cursor = await conn.execute(
+        f"SELECT {_ACTION_COLUMNS} FROM actions WHERE title = ? ORDER BY created_at DESC LIMIT 1",
+        (title,),
+    )
+    row = await cursor.fetchone()
+    return _row_to_action(row) if row else None
+
+
+async def action_exists_this_year(conn: aiosqlite.Connection, title: str, year: int) -> bool:
+    cursor = await conn.execute(
+        "SELECT 1 FROM actions WHERE title = ? AND strftime('%Y', created_at) = ? LIMIT 1",
+        (title, str(year)),
+    )
+    return await cursor.fetchone() is not None
+
+
+async def insert_action(
+    conn: aiosqlite.Connection,
+    *,
+    title: str,
+    priority: int,
+    due_date: date | None,
+    recurrence: str | None = None,
+    expected_value: str | None = None,
+    description: str | None = None,
+) -> int:
+    cursor = await conn.execute(
+        "INSERT INTO actions(title, description, priority, due_date, recurrence, status, "
+        "created_at, snooze_count, expected_value) VALUES (?, ?, ?, ?, ?, 'pending', ?, 0, ?)",
+        (
+            title,
+            description,
+            priority,
+            due_date.isoformat() if due_date else None,
+            recurrence,
+            datetime.now(timezone.utc).isoformat(),
+            expected_value,
+        ),
+    )
+    await conn.commit()
+    return int(cursor.lastrowid or 0)
+
+
+async def get_actions_for_brief(conn: aiosqlite.Connection, today: date) -> tuple[list[Action], list[Action]]:
+    """Возвращает (действия на сегодня, просроченные) - только с проставленным due_date."""
+    today_str = today.isoformat()
+    cursor = await conn.execute(
+        f"SELECT {_ACTION_COLUMNS} FROM actions WHERE status = 'pending' AND due_date = ? "
+        "ORDER BY priority ASC",
+        (today_str,),
+    )
+    today_rows = await cursor.fetchall()
+
+    cursor = await conn.execute(
+        f"SELECT {_ACTION_COLUMNS} FROM actions WHERE status = 'pending' AND due_date < ? "
+        "ORDER BY priority ASC",
+        (today_str,),
+    )
+    overdue_rows = await cursor.fetchall()
+
+    return [_row_to_action(r) for r in today_rows], [_row_to_action(r) for r in overdue_rows]
+
+
+async def mark_action_done(
+    conn: aiosqlite.Connection, action_id: int, completed_at: datetime | None = None
+) -> None:
+    await conn.execute(
+        "UPDATE actions SET status = 'done', completed_at = ? WHERE id = ?",
+        ((completed_at or datetime.now(timezone.utc)).isoformat(), action_id),
+    )
+    await conn.commit()
+
+
+async def snooze_action(conn: aiosqlite.Connection, action_id: int, days: int) -> None:
+    cursor = await conn.execute("SELECT due_date FROM actions WHERE id = ?", (action_id,))
+    row = await cursor.fetchone()
+    base = date.fromisoformat(row["due_date"]) if row and row["due_date"] else date.today()
+    new_due = max(base, date.today()) + timedelta(days=days)
+    await conn.execute(
+        "UPDATE actions SET due_date = ?, snooze_count = snooze_count + 1 WHERE id = ?",
+        (new_due.isoformat(), action_id),
+    )
+    await conn.commit()
+
+
+async def get_daily_stats(conn: aiosqlite.Connection, today: date, threshold: float) -> dict[str, Any]:
+    start = today.isoformat()
+    end = (today + timedelta(days=1)).isoformat()
+
+    cursor = await conn.execute(
+        "SELECT COUNT(*), SUM(CASE WHEN score >= ? THEN 1 ELSE 0 END) FROM leads "
+        "WHERE collected_at >= ? AND collected_at < ?",
+        (threshold, start, end),
+    )
+    row = await cursor.fetchone()
+    collected = row[0] or 0 if row else 0
+    above_threshold = row[1] or 0 if row else 0
+
+    cursor = await conn.execute(
+        "SELECT COUNT(*) FROM lead_outcomes WHERE replied_at >= ? AND replied_at < ?", (start, end)
+    )
+    replied_row = await cursor.fetchone()
+    replied = replied_row[0] or 0 if replied_row else 0
+
+    cursor = await conn.execute(
+        "SELECT source_id, COUNT(*) as cnt FROM leads WHERE collected_at >= ? AND collected_at < ? "
+        "GROUP BY source_id ORDER BY cnt DESC LIMIT 1",
+        (start, end),
+    )
+    best_row = await cursor.fetchone()
+
+    return {
+        "collected": collected,
+        "above_threshold": above_threshold,
+        "replied": replied,
+        "best_source": best_row[0] if best_row else None,
+    }
+
+
+async def get_degraded_sources(conn: aiosqlite.Connection) -> list[dict[str, Any]]:
+    cursor = await conn.execute(
+        "SELECT id, last_error, consecutive_failures FROM sources WHERE consecutive_failures > 0"
+    )
+    rows = await cursor.fetchall()
+    return [
+        {
+            "id": row["id"],
+            "last_error": row["last_error"],
+            "consecutive_failures": row["consecutive_failures"],
+        }
+        for row in rows
+    ]
 
 
 async def get_outcome(conn: aiosqlite.Connection, lead_id: int) -> LeadOutcome | None:
