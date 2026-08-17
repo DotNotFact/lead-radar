@@ -1,22 +1,26 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import get_args
+from typing import Any, get_args
 
-from aiogram import Dispatcher, F, Router
+import aiosqlite
+from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
+from apscheduler.triggers.cron import CronTrigger
 
-from src.actions.brief import compose_daily_brief
+from src.actions.brief import compose_daily_brief, format_income_line
 from src.actions.materializer import materialize_due_actions
 from src.control.chat_config import add_runtime_chat
 from src.control.templates import load_templates
-from src.core import repository
+from src.core import repository, runtime_settings
+from src.core.config import Settings
 from src.core.db import get_connection
 from src.core.models import CompanyStatus, Outcome
-from src.core.yaml_config import load_actions_config
+from src.core.yaml_config import load_actions_config, load_keywords_config
 from src.crm import service as crm_service
 from src.export.exporter import export_leads
 from src.export.stats import format_stats_message
@@ -29,12 +33,6 @@ router = Router(name="lead_radar")
 _VALID_OUTCOMES = set(get_args(Outcome))
 _OUTCOME_LABELS = {"replied": "Ответил", "ignored": "Мимо"}
 _VALID_COMPANY_STATUSES = set(get_args(CompanyStatus))
-
-
-def build_dispatcher() -> Dispatcher:
-    dp = Dispatcher()
-    dp.include_router(router)
-    return dp
 
 
 @router.callback_query(F.data.startswith(f"{CALLBACK_PREFIX}:"))
@@ -82,17 +80,10 @@ async def cmd_health(message: Message, db_path: Path) -> None:
     await message.answer("\n".join(lines))
 
 
-@router.message(Command("sources"))
-async def cmd_sources(message: Message, db_path: Path) -> None:
-    conn = await get_connection(db_path)
-    try:
-        sources = await repository.list_sources(conn)
-    finally:
-        await conn.close()
-
+async def sources_text(conn: aiosqlite.Connection) -> str:
+    sources = await repository.list_sources(conn)
     if not sources:
-        await message.answer("Источников пока нет.")
-        return
+        return "Источников пока нет."
 
     lines = []
     for source in sources:
@@ -101,7 +92,17 @@ async def cmd_sources(message: Message, db_path: Path) -> None:
             f"{flag} {source['id']} (tier {source['tier']}), "
             f"ok: {source['last_ok_at'] or '—'}, ошибок подряд: {source['consecutive_failures']}"
         )
-    await message.answer("\n".join(lines))
+    return "\n".join(lines)
+
+
+@router.message(Command("sources"))
+async def cmd_sources(message: Message, db_path: Path) -> None:
+    conn = await get_connection(db_path)
+    try:
+        text = await sources_text(conn)
+    finally:
+        await conn.close()
+    await message.answer(text)
 
 
 @router.message(Command("pause"))
@@ -140,14 +141,19 @@ async def cmd_addchat(message: Message, config_dir: Path) -> None:
         await message.answer(f"{handle} уже в списке.")
 
 
-@router.message(Command("brief"))
-async def cmd_brief(message: Message, db_path: Path, config_dir: Path, score_threshold: float) -> None:
+async def brief_text(conn: aiosqlite.Connection, config_dir: Path, settings: Settings) -> str:
     today = date.today()
+    actions_config = load_actions_config(config_dir)
+    await materialize_due_actions(conn, actions_config, today)
+    threshold = await runtime_settings.get_score_threshold(conn, settings)
+    return await compose_daily_brief(conn, today, threshold)
+
+
+@router.message(Command("brief"))
+async def cmd_brief(message: Message, db_path: Path, config_dir: Path, settings: Settings) -> None:
     conn = await get_connection(db_path)
     try:
-        actions_config = load_actions_config(config_dir)
-        await materialize_due_actions(conn, actions_config, today)
-        text = await compose_daily_brief(conn, today, score_threshold)
+        text = await brief_text(conn, config_dir, settings)
     finally:
         await conn.close()
     await message.answer(text)
@@ -226,21 +232,25 @@ async def cmd_export(message: Message, db_path: Path) -> None:
     await message.answer_document(BufferedInputFile(content, filename=filename))
 
 
+async def stats_text(conn: aiosqlite.Connection, days: int) -> str:
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    conversion = await repository.get_source_conversion_stats(conn, since)
+    budgets = await repository.get_budget_distribution(conn, since)
+    return format_stats_message(f"{days} дн.", conversion, budgets)
+
+
 @router.message(Command("stats"))
 async def cmd_stats(message: Message, db_path: Path) -> None:
     parts = (message.text or "").split()[1:]
     period = parts[0] if parts else "7d"
     days = 30 if period == "30d" else 7
 
-    since = datetime.now(timezone.utc) - timedelta(days=days)
     conn = await get_connection(db_path)
     try:
-        conversion = await repository.get_source_conversion_stats(conn, since)
-        budgets = await repository.get_budget_distribution(conn, since)
+        text = await stats_text(conn, days)
     finally:
         await conn.close()
-
-    await message.answer(format_stats_message(f"{days} дн.", conversion, budgets))
+    await message.answer(text)
 
 
 _COMPANY_STATUS_LABELS = {
@@ -253,24 +263,28 @@ _COMPANY_STATUS_LABELS = {
 }
 
 
+async def crm_text(conn: aiosqlite.Connection) -> str:
+    companies = await repository.list_companies(conn, open_only=True)
+    lines = []
+    for company in companies:
+        next_touch = await repository.get_open_action_for_company(conn, company.id) if company.id else None
+        due = f", след. касание: {next_touch.due_date}" if next_touch and next_touch.due_date else ""
+        status_label = _COMPANY_STATUS_LABELS.get(company.status, company.status)
+        lines.append(f"[{company.id}] {company.name} — {status_label}{due}")
+
+    if not lines:
+        return "В CRM пока нет компаний. Добавить: /crm_add <название>"
+    return "Компании в работе:\n" + "\n".join(lines)
+
+
 @router.message(Command("crm"))
 async def cmd_crm(message: Message, db_path: Path) -> None:
     conn = await get_connection(db_path)
     try:
-        companies = await repository.list_companies(conn, open_only=True)
-        lines = []
-        for company in companies:
-            next_touch = await repository.get_open_action_for_company(conn, company.id) if company.id else None
-            due = f", след. касание: {next_touch.due_date}" if next_touch and next_touch.due_date else ""
-            status_label = _COMPANY_STATUS_LABELS.get(company.status, company.status)
-            lines.append(f"[{company.id}] {company.name} — {status_label}{due}")
+        text = await crm_text(conn)
     finally:
         await conn.close()
-
-    if not lines:
-        await message.answer("В CRM пока нет компаний. Добавить: /crm_add <название>")
-        return
-    await message.answer("Компании в работе:\n" + "\n".join(lines))
+    await message.answer(text)
 
 
 @router.message(Command("crm_add"))
@@ -368,15 +382,23 @@ async def cmd_goal(message: Message, db_path: Path) -> None:
     await message.answer(f"Цель на месяц: {amount} ₽")
 
 
-@router.message(Command("templates"))
-async def cmd_templates(message: Message, config_dir: Path) -> None:
+async def income_text(conn: aiosqlite.Connection) -> str:
+    line = await format_income_line(conn, date.today())
+    return f"{line}\n\nЗаписать: /income <сумма> [заметка]\nЦель: /goal <сумма>"
+
+
+def templates_list_text(config_dir: Path) -> str:
     templates = load_templates(config_dir)
     if not templates:
-        await message.answer("Шаблонов пока нет. Добавь их в config/templates.yaml.")
-        return
+        return "Шаблонов пока нет. Добавь их в config/templates.yaml."
 
     lines = [f"• {name} — {tmpl.get('title', name)}" for name, tmpl in templates.items()]
-    await message.answer("Доступные шаблоны:\n" + "\n".join(lines) + "\n\nПолучить текст: /template <имя>")
+    return "Доступные шаблоны:\n" + "\n".join(lines) + "\n\nПолучить текст: /template <имя>"
+
+
+@router.message(Command("templates"))
+async def cmd_templates(message: Message, config_dir: Path) -> None:
+    await message.answer(templates_list_text(config_dir))
 
 
 @router.message(Command("template"))
@@ -396,21 +418,110 @@ async def cmd_template(message: Message, config_dir: Path) -> None:
     await message.answer(str(template.get("text", "")).strip())
 
 
-@router.message(Command("hh_status"))
-async def cmd_hh_status(message: Message, db_path: Path) -> None:
-    conn = await get_connection(db_path)
-    try:
-        applications = await repository.list_hh_applications(conn)
-    finally:
-        await conn.close()
-
+async def hh_status_text(conn: aiosqlite.Connection) -> str:
+    applications = await repository.list_hh_applications(conn)
     if not applications:
-        await message.answer(
+        return (
             "Откликов на hh.ru пока нет в базе. Если HH_CLIENT_ID/SECRET/токены заполнены в "
             ".env, синхронизация подтянет их автоматически; иначе см. "
             "python -m scripts.hh_oauth_login в README.md."
         )
+    lines = [f"• {a.vacancy_title or a.vacancy_id or a.id} — {a.state or '?'}" for a in applications]
+    return "Отклики на hh.ru:\n" + "\n".join(lines)
+
+
+@router.message(Command("hh_status"))
+async def cmd_hh_status(message: Message, db_path: Path) -> None:
+    conn = await get_connection(db_path)
+    try:
+        text = await hh_status_text(conn)
+    finally:
+        await conn.close()
+    await message.answer(text)
+
+
+_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+async def settings_text(conn: aiosqlite.Connection, config_dir: Path, settings: Settings) -> str:
+    keywords_config = load_keywords_config(config_dir)
+    threshold = await runtime_settings.get_score_threshold(conn, settings)
+    min_budget = await runtime_settings.get_min_budget_rub(conn, keywords_config)
+    brief_time = await runtime_settings.get_daily_brief_time(conn, settings)
+    return (
+        "⚙️ Текущие настройки:\n"
+        f"• Порог уведомления: {threshold:.0f} — /set_threshold <число>\n"
+        f"• Мин. бюджет: {min_budget} ₽ — /set_budget_floor <число>\n"
+        f"• Время брифа: {brief_time} — /set_brief_time <ЧЧ:ММ>"
+    )
+
+
+@router.message(Command("settings"))
+async def cmd_settings(message: Message, db_path: Path, config_dir: Path, settings: Settings) -> None:
+    conn = await get_connection(db_path)
+    try:
+        text = await settings_text(conn, config_dir, settings)
+    finally:
+        await conn.close()
+    await message.answer(text)
+
+
+@router.message(Command("set_threshold"))
+async def cmd_set_threshold(message: Message, db_path: Path) -> None:
+    parts = (message.text or "").split()[1:]
+    if not parts or not parts[0].lstrip("-").isdigit():
+        await message.answer("Использование: /set_threshold <число>")
         return
 
-    lines = [f"• {a.vacancy_title or a.vacancy_id or a.id} — {a.state or '?'}" for a in applications]
-    await message.answer("Отклики на hh.ru:\n" + "\n".join(lines))
+    value = float(parts[0])
+    conn = await get_connection(db_path)
+    try:
+        await runtime_settings.set_score_threshold(conn, value)
+    finally:
+        await conn.close()
+    await message.answer(f"Порог уведомления: {value:.0f}. Действует сразу, без перезапуска.")
+
+
+@router.message(Command("set_budget_floor"))
+async def cmd_set_budget_floor(message: Message, db_path: Path) -> None:
+    parts = (message.text or "").split()[1:]
+    if not parts or not parts[0].isdigit():
+        await message.answer("Использование: /set_budget_floor <число>")
+        return
+
+    value = int(parts[0])
+    conn = await get_connection(db_path)
+    try:
+        await runtime_settings.set_min_budget_rub(conn, value)
+    finally:
+        await conn.close()
+    await message.answer(f"Минимальный бюджет: {value} ₽. Действует сразу, без перезапуска.")
+
+
+@router.message(Command("set_brief_time"))
+async def cmd_set_brief_time(message: Message, db_path: Path, scheduler: Any = None) -> None:
+    parts = (message.text or "").split()[1:]
+    if not parts or not _TIME_RE.match(parts[0]):
+        await message.answer("Использование: /set_brief_time <ЧЧ:ММ>, например /set_brief_time 09:30")
+        return
+
+    time_str = parts[0]
+    conn = await get_connection(db_path)
+    try:
+        await runtime_settings.set_daily_brief_time(conn, time_str)
+    finally:
+        await conn.close()
+
+    applied_now = False
+    if scheduler is not None:
+        hour, minute = time_str.split(":")
+        try:
+            scheduler.reschedule_job(
+                "daily_brief", trigger=CronTrigger(hour=int(hour), minute=int(minute))
+            )
+            applied_now = True
+        except Exception:
+            logger.exception("reschedule_daily_brief_failed")
+
+    suffix = "применится сразу" if applied_now else "применится после перезапуска процесса"
+    await message.answer(f"Время брифа: {time_str} ({suffix}).")

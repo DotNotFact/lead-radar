@@ -218,15 +218,45 @@ feedparser, SQLite + aiosqlite, APScheduler, pydantic-settings, pytest + pytest-
     неточным до ручной проверки владельцем.
   155 тестов, `mypy --strict` чист. Живых новых багов в этой фазе не найдено (тот же сетевой
   блок `api.telegram.org`/`hh.ru OAuth` для живой проверки, что и раньше).
+- **Фаза 7 (по прямой просьбе владельца) — выполнена.** Настройки, которые раньше требовали
+  правки `.env`/`keywords.yaml` и перезапуска, стали изменяемыми через бота на лету; плюс
+  полноценное инлайн-меню вместо голых команд.
+  - `src/core/runtime_settings.py` — `score_threshold`, `min_budget_rub`, `daily_brief_time`
+    теперь читаются из `system_state` с фолбэком на `.env`/`keywords.yaml` (тот же паттерн,
+    что уже использовался для `collecting_paused` и цели дохода). `apply_min_budget_override`
+    подключён в `src/core/pipeline.py::score_and_store_lead` — единая точка для всех источников
+    с реальными лидами, менять каждый коллектор по отдельности не пришлось.
+  - Команды `/settings`, `/set_threshold`, `/set_budget_floor`, `/set_brief_time`. Смена
+    времени брифа не просто пишет в БД — если бот запущен через `src/main.py`, `scheduler`
+    прокидывается в хэндлеры через workflow data, и `/set_brief_time` вызывает
+    `scheduler.reschedule_job("daily_brief", ...)` вживую, без перезапуска процесса.
+  - **Инлайн-меню** (`src/control/menu.py`): `/start`/`/menu` — кнопки 📋 Бриф, 📊 Статистика,
+    🏢 CRM, 💰 Доход, 📝 Шаблоны, 🔧 Источники, ⚙️ Настройки, ❓ Помощь; `/help` — тот же список
+    текстом. Настройки внутри меню — не текстовый ввод, а пресет-кнопки (пороги 30/50/70/90,
+    бюджет 3000/5000/10000/20000, время брифа 08:00-12:00), значение применяется сразу по тапу.
+    Текстовые команды и кнопки меню используют ОДНИ И ТЕ ЖЕ функции (`bot.py`: `brief_text`,
+    `stats_text`, `crm_text`, `income_text`, `templates_list_text`, `sources_text`,
+    `settings_text` — без ведущего `_`, специально для переиспользования из `menu.py`), чтобы
+    не разъезжались две копии одной и той же логики.
+  - `menu.py` импортирует `bot.py` за этими функциями → сборку `Dispatcher` пришлось вынести в
+    отдельный `src/control/dispatcher.py`, иначе получался цикл импортов (`bot.py` собирал бы
+    диспетчер и импортировал `menu.py`, который импортирует `bot.py`). `main.py` импортирует
+    `build_dispatcher` теперь оттуда.
+  - `scripts/setup_bot.py::COMMANDS` пополнен, `test_setup_bot.py` сверяет список не с одним
+    роутером, а со всеми `sub_routers` собранного `Dispatcher` — иначе тест не заметил бы
+    команды, зарегистрированные в `menu.py`.
+  179 тестов, `mypy --strict` чист.
 
 ## КОМАНДЫ БОТА
 
-`/brief` `/pause` `/resume` `/stats [7d|30d]` `/export [days]` `/addchat <handle>` `/sources`
-`/health` `/todo <текст>` `/done <id>` `/snooze <id> <дней>` `/crm` `/crm_add <название>`
-`/crm_touch <id> <дней> [результат]` `/crm_status <id> <статус>` `/income <сумма> [заметка]`
-`/goal <сумма>` `/templates` `/template <имя>` `/hh_status` — и инлайн-кнопки
-Открыть/Ответил/Мимо под каждым уведомлением о лиде. Список синхронизирован с
-`scripts/setup_bot.py::COMMANDS`, тест `test_setup_bot.py` сверяет его напрямую с роутером.
+`/start` `/menu` `/help` `/brief` `/pause` `/resume` `/stats [7d|30d]` `/export [days]`
+`/addchat <handle>` `/sources` `/health` `/todo <текст>` `/done <id>` `/snooze <id> <дней>`
+`/crm` `/crm_add <название>` `/crm_touch <id> <дней> [результат]` `/crm_status <id> <статус>`
+`/income <сумма> [заметка]` `/goal <сумма>` `/templates` `/template <имя>` `/hh_status`
+`/settings` `/set_threshold <число>` `/set_budget_floor <число>` `/set_brief_time <ЧЧ:ММ>` —
+плюс инлайн-меню (`/start`/`/menu`) и кнопки Открыть/Ответил/Мимо под каждым уведомлением о
+лиде. Список синхронизирован с `scripts/setup_bot.py::COMMANDS`, тест `test_setup_bot.py`
+сверяет его со всеми роутерами собранного `Dispatcher` (`src/control/dispatcher.py`).
 
 ## ЗАПУСК
 
@@ -264,7 +294,8 @@ python -m src.main
   из открытых источников (непроверенными вручную, см. комментарий в файле), почистить под
   себя, затем поставить `telegram.enabled: true`.
 - Порог скоринга, минимальный бюджет, время брифа — стоят дефолты в `.env`/`keywords.yaml`,
-  подправить под себя.
+  но менять их проще через бота: `/settings` или кнопка ⚙️ в `/menu` (Фаза 7), без правки
+  файлов и перезапуска.
 - Первый запуск Telethon потребует один раз интерактивно ввести код из Telegram — появится
   `*.session`, он в `.gitignore`.
 - `HH_CLIENT_ID`/`HH_CLIENT_SECRET`/`HH_REDIRECT_URI` — опционально, только для `/hh_status`.

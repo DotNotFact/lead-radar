@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -20,6 +20,10 @@ from src.control.bot import (
     cmd_income,
     cmd_pause,
     cmd_resume,
+    cmd_set_brief_time,
+    cmd_set_budget_floor,
+    cmd_set_threshold,
+    cmd_settings,
     cmd_snooze,
     cmd_sources,
     cmd_stats,
@@ -27,6 +31,7 @@ from src.control.bot import (
     handle_outcome_callback,
 )
 from src.core import repository
+from src.core.config import Settings
 from src.core.db import apply_migrations, get_connection
 from src.core.models import HhApplication, Lead
 
@@ -121,7 +126,7 @@ async def test_cmd_brief_materializes_and_sends_text(tmp_path: Path) -> None:
     db_path = await _seed_db(tmp_path)
     message = SimpleNamespace(answer=AsyncMock())
 
-    await cmd_brief(message, db_path=db_path, config_dir=CONFIG_DIR, score_threshold=50)
+    await cmd_brief(message, db_path=db_path, config_dir=CONFIG_DIR, settings=Settings(_env_file=None, score_threshold=50))  # type: ignore[call-arg]
 
     message.answer.assert_called_once()
     text = message.answer.call_args.args[0]
@@ -399,3 +404,85 @@ async def test_cmd_hh_status_lists_applications(tmp_path: Path) -> None:
     text = message.answer.call_args.args[0]
     assert "Backend Dev" in text
     assert "invitation" in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_settings_shows_effective_values(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    settings = Settings(_env_file=None, score_threshold=50, daily_brief_time="09:00")  # type: ignore[call-arg]
+
+    message = SimpleNamespace(answer=AsyncMock())
+    await cmd_settings(message, db_path=db_path, config_dir=CONFIG_DIR, settings=settings)
+    text = message.answer.call_args.args[0]
+
+    assert "50" in text
+    assert "09:00" in text
+    assert "/set_threshold" in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_set_threshold_updates_and_reflects_in_settings(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    settings = Settings(_env_file=None, score_threshold=50)  # type: ignore[call-arg]
+
+    set_message = SimpleNamespace(text="/set_threshold 77", answer=AsyncMock())
+    await cmd_set_threshold(set_message, db_path=db_path)
+    assert "77" in set_message.answer.call_args.args[0]
+
+    settings_message = SimpleNamespace(answer=AsyncMock())
+    await cmd_settings(settings_message, db_path=db_path, config_dir=CONFIG_DIR, settings=settings)
+    assert "77" in settings_message.answer.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_set_threshold_rejects_non_numeric(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    message = SimpleNamespace(text="/set_threshold abc", answer=AsyncMock())
+    await cmd_set_threshold(message, db_path=db_path)
+    assert "Использование" in message.answer.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_set_budget_floor_updates(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    message = SimpleNamespace(text="/set_budget_floor 8000", answer=AsyncMock())
+    await cmd_set_budget_floor(message, db_path=db_path)
+    assert "8000" in message.answer.call_args.args[0]
+
+    conn = await get_connection(db_path)
+    value = await repository.get_system_state(conn, "override:min_budget_rub")
+    await conn.close()
+    assert value == "8000"
+
+
+@pytest.mark.asyncio
+async def test_cmd_set_brief_time_without_scheduler(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    message = SimpleNamespace(text="/set_brief_time 14:30", answer=AsyncMock())
+    await cmd_set_brief_time(message, db_path=db_path)
+    text = message.answer.call_args.args[0]
+    assert "14:30" in text
+    assert "перезапуска" in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_set_brief_time_reschedules_when_scheduler_present(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    fake_scheduler = SimpleNamespace(reschedule_job=MagicMock())
+    message = SimpleNamespace(text="/set_brief_time 14:30", answer=AsyncMock())
+
+    await cmd_set_brief_time(message, db_path=db_path, scheduler=fake_scheduler)
+
+    fake_scheduler.reschedule_job.assert_called_once()
+    args, kwargs = fake_scheduler.reschedule_job.call_args
+    assert args[0] == "daily_brief"
+    text = message.answer.call_args.args[0]
+    assert "применится сразу" in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_set_brief_time_rejects_bad_format(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    message = SimpleNamespace(text="/set_brief_time 25:99", answer=AsyncMock())
+    await cmd_set_brief_time(message, db_path=db_path)
+    assert "Использование" in message.answer.call_args.args[0]

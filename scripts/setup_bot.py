@@ -13,6 +13,9 @@ from aiogram.types import BotCommand
 from src.core.config import get_settings
 
 COMMANDS = [
+    BotCommand(command="start", description="Приветствие и главное меню"),
+    BotCommand(command="menu", description="Главное меню кнопками"),
+    BotCommand(command="help", description="Полный список команд"),
     BotCommand(command="brief", description="Бриф на сегодня: действия, просроченное, статистика"),
     BotCommand(command="stats", description="Статистика за период: /stats 7d или /stats 30d"),
     BotCommand(command="export", description="Экспорт лидов в CSV: /export [дней]"),
@@ -33,6 +36,10 @@ COMMANDS = [
     BotCommand(command="templates", description="Список шаблонов первого ответа"),
     BotCommand(command="template", description="Получить текст шаблона: /template имя"),
     BotCommand(command="hh_status", description="Статусы собственных откликов на hh.ru"),
+    BotCommand(command="settings", description="Текущие настройки: порог, бюджет, время брифа"),
+    BotCommand(command="set_threshold", description="Порог уведомления: /set_threshold число"),
+    BotCommand(command="set_budget_floor", description="Мин. бюджет: /set_budget_floor число"),
+    BotCommand(command="set_brief_time", description="Время брифа: /set_brief_time ЧЧ:ММ"),
 ]
 
 DESCRIPTION = (

@@ -28,7 +28,7 @@ from scripts.sync_hh_applications import sync_hh_applications
 from src.actions.brief import compose_daily_brief
 from src.actions.materializer import materialize_due_actions
 from src.collectors.telegram import TelegramCollector
-from src.control.bot import build_dispatcher
+from src.control.dispatcher import build_dispatcher
 from src.control.chat_config import load_runtime_chats
 from src.core import repository
 from src.core.config import Settings, get_settings
@@ -37,6 +37,7 @@ from src.core.logging_config import log_source_degraded, setup_logging
 from src.core.models import RawLead
 from src.core.pipeline import score_and_store_lead
 from src.core.retry import retry_with_backoff
+from src.core.runtime_settings import get_score_threshold
 from src.core.yaml_config import (
     KeywordsConfig,
     SourceConfig,
@@ -108,7 +109,8 @@ async def _run_notify_job(bot: Bot, settings: Settings) -> None:
         return
     conn = await get_connection(settings.db_path)
     try:
-        sent = await notify_pending_leads(bot, settings.channel_id, conn, settings.score_threshold)
+        threshold = await get_score_threshold(conn, settings)
+        sent = await notify_pending_leads(bot, settings.channel_id, conn, threshold)
         if sent:
             logger.info("notify_job_done", extra={"sent": sent})
     finally:
@@ -126,7 +128,8 @@ async def _run_daily_brief_job(bot: Bot, settings: Settings) -> None:
         actions_config = load_actions_config(settings.config_dir)
         today = datetime.now(timezone.utc).date()
         await materialize_due_actions(conn, actions_config, today)
-        text = await compose_daily_brief(conn, today, settings.score_threshold)
+        threshold = await get_score_threshold(conn, settings)
+        text = await compose_daily_brief(conn, today, threshold)
     finally:
         await conn.close()
     await retry_with_backoff(lambda: bot.send_message(chat_id=channel_id, text=text))
@@ -295,7 +298,8 @@ async def main() -> None:
             bot,
             db_path=settings.db_path,
             config_dir=settings.config_dir,
-            score_threshold=settings.score_threshold,
+            settings=settings,
+            scheduler=scheduler,
         )
     finally:
         scheduler.shutdown(wait=False)

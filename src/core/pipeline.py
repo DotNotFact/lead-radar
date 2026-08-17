@@ -4,6 +4,7 @@ import aiosqlite
 
 from src.core import repository
 from src.core.models import Lead, RawLead
+from src.core.runtime_settings import apply_min_budget_override
 from src.core.yaml_config import KeywordsConfig
 from src.scoring.budget import parse_budget
 from src.scoring.dedup import content_hash
@@ -15,6 +16,7 @@ async def score_and_store_lead(
 ) -> bool:
     """Общий хвост конвейера для всех источников с реальными лидами: парсинг бюджета,
     скоринг, дедуп по хешу текста, запись. Возвращает True, если запись новая."""
+    keywords_config = await apply_min_budget_override(conn, keywords_config)
     budget = parse_budget(raw.raw_budget or raw.text)
     scoring = score_lead(raw.title, raw.text, raw.author_handle, budget, keywords_config)
     hash_ = content_hash(f"{raw.title or ''} {raw.text or ''}")

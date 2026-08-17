@@ -5,17 +5,19 @@ import re
 from aiogram.filters import Command
 
 from scripts.setup_bot import COMMANDS, DESCRIPTION, SHORT_DESCRIPTION
-from src.control.bot import router
+from src.control.dispatcher import build_dispatcher
 
 _COMMAND_NAME_RE = re.compile(r"^[a-z0-9_]{1,32}$")
 
 
 def _registered_command_names() -> set[str]:
     names: set[str] = set()
-    for observer in router.message.handlers:
-        for f in observer.filters or []:
-            if isinstance(f.callback, Command):
-                names.update(c for c in f.callback.commands if isinstance(c, str))
+    dispatcher = build_dispatcher()
+    for router in [dispatcher, *dispatcher.sub_routers]:
+        for observer in router.message.handlers:
+            for f in observer.filters or []:
+                if isinstance(f.callback, Command):
+                    names.update(c for c in f.callback.commands if isinstance(c, str))
     return names
 
 

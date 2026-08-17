@@ -25,6 +25,19 @@ def _month_bounds(today: date) -> tuple[date, date]:
     return start, end
 
 
+async def format_income_line(conn: aiosqlite.Connection, today: date) -> str:
+    """Отдельная функция, чтобы то же самое можно было показать по кнопке "Доход" в меню,
+    не только в ежедневном брифе."""
+    month_start, month_end = _month_bounds(today)
+    income = await repository.get_income_for_period(conn, month_start, month_end)
+    goal_raw = await repository.get_system_state(conn, repository.MONTHLY_GOAL_KEY)
+    if goal_raw:
+        goal = int(goal_raw)
+        percent = (income / goal * 100) if goal else 0
+        return f"**Доход за месяц:** {income} из {goal} ₽ ({percent:.0f}%)"
+    return f"**Доход за месяц:** {income} ₽ (цель не задана, /goal <сумма>)"
+
+
 async def compose_daily_brief(conn: aiosqlite.Connection, today: date, threshold: float) -> str:
     today_actions, overdue_actions = await repository.get_actions_for_brief(conn, today)
 
@@ -51,15 +64,7 @@ async def compose_daily_brief(conn: aiosqlite.Connection, today: date, threshold
         f"• лучший источник: {stats['best_source'] or '—'}"
     )
 
-    month_start, month_end = _month_bounds(today)
-    income = await repository.get_income_for_period(conn, month_start, month_end)
-    goal_raw = await repository.get_system_state(conn, repository.MONTHLY_GOAL_KEY)
-    if goal_raw:
-        goal = int(goal_raw)
-        percent = (income / goal * 100) if goal else 0
-        sections.append(f"**Доход за месяц:** {income} из {goal} ₽ ({percent:.0f}%)")
-    else:
-        sections.append(f"**Доход за месяц:** {income} ₽ (цель не задана, /goal <сумма>)")
+    sections.append(await format_income_line(conn, today))
 
     degraded = await repository.get_degraded_sources(conn)
     if degraded:
