@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     bot_token: str = Field(default="")
+    contact_email: str = Field(default="")
     telegram_api_id: int | None = Field(default=None)
     telegram_api_hash: str | None = Field(default=None)
     telegram_session_name: str = Field(default="lead_radar_collector")

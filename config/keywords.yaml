@@ -15,7 +15,8 @@ positive_signals:
     weight: 10
   detailed_spec:
     weight: 5
-    note: "длина текста выше медианы по накопленным лидам"
+    min_chars: 400
+    note: "порог фиксированный на старте (медиана по рынку ещё не накоплена), пересмотреть после Фазы 4"
   author_has_contact:
     weight: 5
     note: "у автора есть username/контакт"

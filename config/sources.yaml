@@ -17,6 +17,7 @@ sources:
       - "бэкенд разработчик"
     remote_only: true
     fetch_full_description: true
+    initial_lookback_days: 7  # если в БД ещё нет лидов источника — с какой даты начинать
 
   telegram:
     tier: 1
