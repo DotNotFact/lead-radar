@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -8,8 +9,15 @@ import pytest
 
 from src.control.bot import (
     cmd_brief,
+    cmd_crm,
+    cmd_crm_add,
+    cmd_crm_status,
+    cmd_crm_touch,
     cmd_done,
     cmd_export,
+    cmd_goal,
+    cmd_hh_status,
+    cmd_income,
     cmd_pause,
     cmd_resume,
     cmd_snooze,
@@ -20,7 +28,7 @@ from src.control.bot import (
 )
 from src.core import repository
 from src.core.db import apply_migrations, get_connection
-from src.core.models import Lead
+from src.core.models import HhApplication, Lead
 
 MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
@@ -167,7 +175,6 @@ async def test_cmd_done_marks_action_completed(tmp_path: Path) -> None:
 async def test_cmd_snooze_pushes_due_date_and_increments_count(tmp_path: Path) -> None:
     db_path = await _seed_db(tmp_path)
     conn = await get_connection(db_path)
-    from datetime import date
 
     action_id = await repository.insert_action(
         conn, title="Тест снуза", priority=2, due_date=date(2026, 8, 1)
@@ -236,3 +243,159 @@ async def test_cmd_stats_reports_conversion(tmp_path: Path) -> None:
     text = message.answer.call_args.args[0]
     assert "hh_ru" in text
     assert "30 дн." in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_crm_add_and_list(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+
+    add_message = SimpleNamespace(text="/crm_add Acme LLC", answer=AsyncMock())
+    await cmd_crm_add(add_message, db_path=db_path)
+    assert "Acme LLC" in add_message.answer.call_args.args[0]
+
+    list_message = SimpleNamespace(answer=AsyncMock())
+    await cmd_crm(list_message, db_path=db_path)
+    text = list_message.answer.call_args.args[0]
+    assert "Acme LLC" in text
+    assert "новый" in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_crm_add_without_name_shows_usage(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    message = SimpleNamespace(text="/crm_add", answer=AsyncMock())
+    await cmd_crm_add(message, db_path=db_path)
+    assert "Использование" in message.answer.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_crm_empty_shows_hint(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    message = SimpleNamespace(answer=AsyncMock())
+    await cmd_crm(message, db_path=db_path)
+    assert "/crm_add" in message.answer.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_crm_touch_records_result_and_schedules_next(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    add_message = SimpleNamespace(text="/crm_add Beta Inc", answer=AsyncMock())
+    await cmd_crm_add(add_message, db_path=db_path)
+
+    conn = await get_connection(db_path)
+    company = (await repository.list_companies(conn))[0]
+    await conn.close()
+
+    touch_message = SimpleNamespace(text=f"/crm_touch {company.id} 5 Обещали подумать", answer=AsyncMock())
+    await cmd_crm_touch(touch_message, db_path=db_path)
+
+    conn = await get_connection(db_path)
+    updated = await repository.get_company(conn, company.id)  # type: ignore[arg-type]
+    open_action = await repository.get_open_action_for_company(conn, company.id)  # type: ignore[arg-type]
+    await conn.close()
+
+    assert updated is not None and updated.result == "Обещали подумать"
+    assert open_action is not None
+
+
+@pytest.mark.asyncio
+async def test_cmd_crm_touch_rejects_bad_args(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    message = SimpleNamespace(text="/crm_touch abc", answer=AsyncMock())
+    await cmd_crm_touch(message, db_path=db_path)
+    assert "Использование" in message.answer.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_crm_touch_unknown_company(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    message = SimpleNamespace(text="/crm_touch 999 5 привет", answer=AsyncMock())
+    await cmd_crm_touch(message, db_path=db_path)
+    assert "не найдена" in message.answer.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_crm_status_updates_status(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    add_message = SimpleNamespace(text="/crm_add Delta", answer=AsyncMock())
+    await cmd_crm_add(add_message, db_path=db_path)
+
+    conn = await get_connection(db_path)
+    company = (await repository.list_companies(conn))[0]
+    await conn.close()
+
+    status_message = SimpleNamespace(text=f"/crm_status {company.id} won", answer=AsyncMock())
+    await cmd_crm_status(status_message, db_path=db_path)
+
+    conn = await get_connection(db_path)
+    updated = await repository.get_company(conn, company.id)  # type: ignore[arg-type]
+    await conn.close()
+    assert updated is not None and updated.status == "won"
+
+
+@pytest.mark.asyncio
+async def test_cmd_crm_status_rejects_invalid_status(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    message = SimpleNamespace(text="/crm_status 1 bogus", answer=AsyncMock())
+    await cmd_crm_status(message, db_path=db_path)
+    assert "Использование" in message.answer.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_income_records_payment(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    message = SimpleNamespace(text="/income 15000 за консультацию", answer=AsyncMock())
+    await cmd_income(message, db_path=db_path)
+
+    assert "15000" in message.answer.call_args.args[0]
+
+    conn = await get_connection(db_path)
+    total = await repository.get_income_for_period(conn, date.today(), date.today() + timedelta(days=1))
+    await conn.close()
+    assert total == 15000
+
+
+@pytest.mark.asyncio
+async def test_cmd_income_rejects_non_numeric(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    message = SimpleNamespace(text="/income много", answer=AsyncMock())
+    await cmd_income(message, db_path=db_path)
+    assert "Использование" in message.answer.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_goal_sets_monthly_goal(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    message = SimpleNamespace(text="/goal 200000", answer=AsyncMock())
+    await cmd_goal(message, db_path=db_path)
+
+    assert "200000" in message.answer.call_args.args[0]
+
+    conn = await get_connection(db_path)
+    stored = await repository.get_system_state(conn, repository.MONTHLY_GOAL_KEY)
+    await conn.close()
+    assert stored == "200000"
+
+
+@pytest.mark.asyncio
+async def test_cmd_hh_status_empty(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    message = SimpleNamespace(answer=AsyncMock())
+    await cmd_hh_status(message, db_path=db_path)
+    assert "python -m scripts.hh_oauth_login" in message.answer.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_hh_status_lists_applications(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    conn = await get_connection(db_path)
+    await repository.upsert_hh_application(
+        conn, HhApplication(id="1", vacancy_title="Backend Dev", state="invitation")
+    )
+    await conn.close()
+
+    message = SimpleNamespace(answer=AsyncMock())
+    await cmd_hh_status(message, db_path=db_path)
+    text = message.answer.call_args.args[0]
+    assert "Backend Dev" in text
+    assert "invitation" in text

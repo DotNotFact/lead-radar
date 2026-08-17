@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import aiosqlite
 
@@ -16,6 +16,13 @@ def _format_action_line(action: Action, escalate: bool) -> str:
     if escalate and action.expected_value:
         line += f"\n   ⚠ {action.expected_value} (откладывалось {action.snooze_count} раз)"
     return line
+
+
+def _month_bounds(today: date) -> tuple[date, date]:
+    start = today.replace(day=1)
+    next_month = start.replace(day=28) + timedelta(days=4)
+    end = next_month.replace(day=1)
+    return start, end
 
 
 async def compose_daily_brief(conn: aiosqlite.Connection, today: date, threshold: float) -> str:
@@ -43,6 +50,16 @@ async def compose_daily_brief(conn: aiosqlite.Connection, today: date, threshold
         f"• отвечено: {stats['replied']}\n"
         f"• лучший источник: {stats['best_source'] or '—'}"
     )
+
+    month_start, month_end = _month_bounds(today)
+    income = await repository.get_income_for_period(conn, month_start, month_end)
+    goal_raw = await repository.get_system_state(conn, repository.MONTHLY_GOAL_KEY)
+    if goal_raw:
+        goal = int(goal_raw)
+        percent = (income / goal * 100) if goal else 0
+        sections.append(f"**Доход за месяц:** {income} из {goal} ₽ ({percent:.0f}%)")
+    else:
+        sections.append(f"**Доход за месяц:** {income} ₽ (цель не задана, /goal <сумма>)")
 
     degraded = await repository.get_degraded_sources(conn)
     if degraded:

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 Outcome = Literal["ignored", "replied", "negotiating", "won", "lost"]
 ActionStatus = Literal["pending", "done", "snoozed", "dropped"]
+CompanyStatus = Literal["new", "contacted", "negotiating", "won", "lost", "on_hold"]
 
 
 class RawLead(BaseModel):
@@ -65,6 +66,41 @@ class Action(BaseModel):
     completed_at: datetime | None = None
     snooze_count: int = 0
     expected_value: str | None = None
+    company_id: int | None = None
+
+
+class Company(BaseModel):
+    id: int | None = None
+    name: str
+    contact_person: str | None = None
+    contact_info: str | None = None
+    status: CompanyStatus = "new"
+    result: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class HhApplication(BaseModel):
+    id: str
+    vacancy_id: str | None = None
+    vacancy_title: str | None = None
+    vacancy_url: str | None = None
+    state: str | None = None
+    hh_created_at: datetime | None = None
+    hh_updated_at: datetime | None = None
+    last_synced_at: datetime | None = None
+    last_notified_state: str | None = None
+
+
+class Payment(BaseModel):
+    id: int | None = None
+    amount: int
+    currency: str = "RUB"
+    received_at: date
+    lead_id: int | None = None
+    company_id: int | None = None
+    note: str | None = None
+    created_at: datetime | None = None
 
 
 class HealthStatus(BaseModel):

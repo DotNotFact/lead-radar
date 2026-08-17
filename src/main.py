@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from aiogram import Bot
@@ -22,6 +23,8 @@ from apscheduler.triggers.interval import IntervalTrigger
 from scripts.collect_hh import collect_and_store as collect_hh_and_store
 from scripts.collect_kwork import collect_kwork_catalog, collect_kwork_projects
 from scripts.collect_rss import collect_and_store as collect_rss_and_store
+from scripts.sync_hh_applications import is_configured as hh_applications_configured
+from scripts.sync_hh_applications import sync_hh_applications
 from src.actions.brief import compose_daily_brief
 from src.actions.materializer import materialize_due_actions
 from src.collectors.telegram import TelegramCollector
@@ -43,6 +46,7 @@ from src.core.yaml_config import (
     load_sources_config,
 )
 from src.notifier.health_alerts import check_and_notify_source_health
+from src.notifier.hh_application_alerts import notify_application_changes
 from src.notifier.notifier import notify_pending_leads
 
 logger = logging.getLogger("lead_radar.main")
@@ -81,6 +85,22 @@ async def _run_kwork_catalog_job(settings: Settings, sources_config: SourcesConf
     if await _is_paused(settings):
         return
     await collect_kwork_catalog(settings, sources_config)
+
+
+async def _run_hh_applications_job(bot: Bot, settings: Settings, env_path: Path) -> None:
+    if not settings.channel_id:
+        return
+    result = await sync_hh_applications(settings, env_path)
+    changed = result.get("changed") or []
+    if not changed:
+        return
+    conn = await get_connection(settings.db_path)
+    try:
+        sent = await notify_application_changes(bot, settings.channel_id, conn, changed)
+        if sent:
+            logger.info("hh_applications_notify_done", extra={"sent": sent})
+    finally:
+        await conn.close()
 
 
 async def _run_notify_job(bot: Bot, settings: Settings) -> None:
@@ -233,6 +253,14 @@ async def main() -> None:
     scheduler.add_job(
         _run_notify_job, IntervalTrigger(seconds=60), args=[bot, settings], id="notify_pending"
     )
+
+    if hh_applications_configured(settings):
+        scheduler.add_job(
+            _run_hh_applications_job,
+            IntervalTrigger(seconds=1800),
+            args=[bot, settings, Path(".env")],
+            id="hh_applications_sync",
+        )
 
     scheduler.add_job(
         _run_source_health_job,

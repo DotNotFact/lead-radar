@@ -186,12 +186,47 @@ feedparser, SQLite + aiosqlite, APScheduler, pydantic-settings, pytest + pytest-
   инструкция (в отличие от этого файла, который для меня). `setup.ps1`/`run.ps1` в корне -
   обёртки первого запуска и обычного запуска для человека без запоминания команд.
   107 тестов, `mypy --strict` чист.
+- **Фаза 6 (по прямой просьбе владельца, после выхода изначального плана из ТЗ) — выполнена.**
+  Четыре фичи: простой CRM, учёт дохода, библиотека шаблонов, отслеживание собственных откликов
+  на hh.ru. Отдельно отклонена просьба владельца заставить юзербота самому подписаться на
+  Telegram-каналы — прямое нарушение инварианта 3 и риск бана аккаунта; вместо этого список
+  `telegram.chats` в `sources.yaml` заполнен 62 хендлами, собранными из трёх открытых статей
+  (ссылки вытащены из реального DOM страниц через браузер, не через AI-пересказ — один
+  источник с формулировками вроде `@backend_jobs`/`@ai_jobs` оказался переспамленной
+  сгенерированной страницей с нулём настоящих ссылок и был отброшен целиком). Список
+  непроверен вручную, отмечено прямо в комментарии над ним.
+  - **CRM** (`src/crm/service.py`, миграция `0003_crm_income.sql` → таблица `companies`):
+    напоминания о касаниях — не отдельный движок, а обычные строки `actions` с новым FK
+    `company_id` — переиспользуют уже готовый бриф/эскалацию/`/snooze`/`/done`. Команды
+    `/crm`, `/crm_add`, `/crm_touch`, `/crm_status`.
+  - **Доход** (таблица `payments`, та же миграция): `/income`, `/goal`, цель месяца и % —
+    новая секция в `compose_daily_brief`.
+  - **Шаблоны** (`config/templates.yaml`, `src/control/templates.py`): статические тексты,
+    `/templates` / `/template <имя>` — бот присылает текст, копирует и правит владелец,
+    система по-прежнему никому не пишет сама (инвариант 1).
+  - **Отклики на hh.ru** (`src/collectors/hh_applications.py`, миграция
+    `0004_hh_applications.sql`): OAuth2 (authorization code + refresh), т.к. публичный API
+    вакансий из Фазы 1 для чужих данных не подходит. `scripts/hh_oauth_login.py` — разовый
+    интерактивный логин (открыть URL в браузере → вставить code → токены сами уйдут в `.env`
+    через новый `src/core/env_file.py`, который точечно правит `.env`, не трогая остальное).
+    `scripts/sync_hh_applications.py` сравнивает состояние с `last_notified_state` (не с
+    текущим `state`), чтобы неудачная отправка уведомления не терялась молча — джоба в
+    `main.py` (раз в 30 мин, только если все 4 переменные `HH_*` заполнены). Команда
+    `/hh_status`. **Поля ответа `/negotiations` — по документации hh.ru, не проверены на живом
+    ответе** (нет доступа к персональному OAuth-токену из песочницы) - если структура другая,
+    `SourceUnavailableError` уведёт источник в degraded, не уронив систему, но сообщение будет
+    неточным до ручной проверки владельцем.
+  155 тестов, `mypy --strict` чист. Живых новых багов в этой фазе не найдено (тот же сетевой
+  блок `api.telegram.org`/`hh.ru OAuth` для живой проверки, что и раньше).
 
 ## КОМАНДЫ БОТА
 
 `/brief` `/pause` `/resume` `/stats [7d|30d]` `/export [days]` `/addchat <handle>` `/sources`
-`/health` `/todo <текст>` `/done <id>` `/snooze <id> <дней>` — и инлайн-кнопки Открыть/Ответил/
-Мимо под каждым уведомлением о лиде.
+`/health` `/todo <текст>` `/done <id>` `/snooze <id> <дней>` `/crm` `/crm_add <название>`
+`/crm_touch <id> <дней> [результат]` `/crm_status <id> <статус>` `/income <сумма> [заметка]`
+`/goal <сумма>` `/templates` `/template <имя>` `/hh_status` — и инлайн-кнопки
+Открыть/Ответил/Мимо под каждым уведомлением о лиде. Список синхронизирован с
+`scripts/setup_bot.py::COMMANDS`, тест `test_setup_bot.py` сверяет его напрямую с роутером.
 
 ## ЗАПУСК
 
@@ -203,6 +238,11 @@ feedparser, SQLite + aiosqlite, APScheduler, pydantic-settings, pytest + pytest-
 python -m scripts.collect_hh
 python -m scripts.collect_rss
 python -m scripts.collect_kwork
+python -m scripts.sync_hh_applications   # только если настроен HH OAuth
+```
+Разовый OAuth-логин hh.ru (перед первым sync_hh_applications):
+```
+python -m scripts.hh_oauth_login
 ```
 Настройка профиля бота в Telegram (команды, описание, короткое описание — один раз):
 ```
@@ -220,12 +260,16 @@ python -m src.main
 - `BOT_TOKEN` — уже заполнен.
 - `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` — my.telegram.org, для отдельной симки.
 - `CHANNEL_ID` — создать приватный канал, добавить туда бота администратором, вписать id.
-- Список Telegram-чатов в `config/sources.yaml` → `telegram.chats` — собрать 60–100 штук (см.
-  комментарий в файле), затем поставить `telegram.enabled: true`.
+- Список Telegram-чатов в `config/sources.yaml` → `telegram.chats` — уже заполнен 62 хендлами
+  из открытых источников (непроверенными вручную, см. комментарий в файле), почистить под
+  себя, затем поставить `telegram.enabled: true`.
 - Порог скоринга, минимальный бюджет, время брифа — стоят дефолты в `.env`/`keywords.yaml`,
   подправить под себя.
 - Первый запуск Telethon потребует один раз интерактивно ввести код из Telegram — появится
   `*.session`, он в `.gitignore`.
+- `HH_CLIENT_ID`/`HH_CLIENT_SECRET`/`HH_REDIRECT_URI` — опционально, только для `/hh_status`.
+  Зарегистрировать приложение на dev.hh.ru, затем `python -m scripts.hh_oauth_login` сам
+  впишет `HH_ACCESS_TOKEN`/`HH_REFRESH_TOKEN`.
 
 Все прочие источники (`hh_ru`, `kwork_projects`, `kwork_catalog`, `rss_remote_jobs`) уже
 `enabled: true` и не требуют дополнительной настройки.

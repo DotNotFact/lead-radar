@@ -6,11 +6,11 @@ from typing import Any
 
 import aiosqlite
 
-from src.core.models import Action, Lead, LeadOutcome, Outcome
+from src.core.models import Action, Company, HhApplication, Lead, LeadOutcome, Outcome, Payment
 
 _ACTION_COLUMNS = (
     "id, title, description, priority, due_date, recurrence, status, created_at, "
-    "completed_at, snooze_count, expected_value"
+    "completed_at, snooze_count, expected_value, company_id"
 )
 
 
@@ -27,6 +27,7 @@ def _row_to_action(row: aiosqlite.Row) -> Action:
         completed_at=datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None,
         snooze_count=row["snooze_count"],
         expected_value=row["expected_value"],
+        company_id=row["company_id"],
     )
 
 _LEAD_COLUMNS = (
@@ -226,6 +227,9 @@ async def list_sources(conn: aiosqlite.Connection) -> list[dict[str, object]]:
     ]
 
 
+MONTHLY_GOAL_KEY = "monthly_income_goal"
+
+
 async def get_system_state(conn: aiosqlite.Connection, key: str, default: str | None = None) -> str | None:
     cursor = await conn.execute("SELECT value FROM system_state WHERE key = ?", (key,))
     row = await cursor.fetchone()
@@ -267,10 +271,12 @@ async def insert_action(
     recurrence: str | None = None,
     expected_value: str | None = None,
     description: str | None = None,
+    company_id: int | None = None,
 ) -> int:
     cursor = await conn.execute(
         "INSERT INTO actions(title, description, priority, due_date, recurrence, status, "
-        "created_at, snooze_count, expected_value) VALUES (?, ?, ?, ?, ?, 'pending', ?, 0, ?)",
+        "created_at, snooze_count, expected_value, company_id) "
+        "VALUES (?, ?, ?, ?, ?, 'pending', ?, 0, ?, ?)",
         (
             title,
             description,
@@ -279,10 +285,17 @@ async def insert_action(
             recurrence,
             datetime.now(timezone.utc).isoformat(),
             expected_value,
+            company_id,
         ),
     )
     await conn.commit()
     return int(cursor.lastrowid or 0)
+
+
+async def get_action(conn: aiosqlite.Connection, action_id: int) -> Action | None:
+    cursor = await conn.execute(f"SELECT {_ACTION_COLUMNS} FROM actions WHERE id = ?", (action_id,))
+    row = await cursor.fetchone()
+    return _row_to_action(row) if row else None
 
 
 async def get_actions_for_brief(conn: aiosqlite.Connection, today: date) -> tuple[list[Action], list[Action]]:
@@ -465,3 +478,200 @@ async def get_outcome(conn: aiosqlite.Connection, lead_id: int) -> LeadOutcome |
         amount=row["amount"],
         notes=row["notes"],
     )
+
+
+# ---- CRM: companies ----
+
+_COMPANY_COLUMNS = "id, name, contact_person, contact_info, status, result, created_at, updated_at"
+
+
+def _row_to_company(row: aiosqlite.Row) -> Company:
+    return Company(
+        id=row["id"],
+        name=row["name"],
+        contact_person=row["contact_person"],
+        contact_info=row["contact_info"],
+        status=row["status"],
+        result=row["result"],
+        created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else None,
+        updated_at=datetime.fromisoformat(row["updated_at"]) if row["updated_at"] else None,
+    )
+
+
+async def insert_company(
+    conn: aiosqlite.Connection,
+    *,
+    name: str,
+    contact_person: str | None = None,
+    contact_info: str | None = None,
+) -> int:
+    now = datetime.now(timezone.utc).isoformat()
+    cursor = await conn.execute(
+        "INSERT INTO companies(name, contact_person, contact_info, status, created_at, updated_at) "
+        "VALUES (?, ?, ?, 'new', ?, ?)",
+        (name, contact_person, contact_info, now, now),
+    )
+    await conn.commit()
+    return int(cursor.lastrowid or 0)
+
+
+async def get_company(conn: aiosqlite.Connection, company_id: int) -> Company | None:
+    cursor = await conn.execute(f"SELECT {_COMPANY_COLUMNS} FROM companies WHERE id = ?", (company_id,))
+    row = await cursor.fetchone()
+    return _row_to_company(row) if row else None
+
+
+async def list_companies(conn: aiosqlite.Connection, *, open_only: bool = False) -> list[Company]:
+    if open_only:
+        cursor = await conn.execute(
+            f"SELECT {_COMPANY_COLUMNS} FROM companies WHERE status NOT IN ('won', 'lost') "
+            "ORDER BY updated_at DESC"
+        )
+    else:
+        cursor = await conn.execute(f"SELECT {_COMPANY_COLUMNS} FROM companies ORDER BY updated_at DESC")
+    rows = await cursor.fetchall()
+    return [_row_to_company(r) for r in rows]
+
+
+async def update_company_status(conn: aiosqlite.Connection, company_id: int, status: str) -> None:
+    await conn.execute(
+        "UPDATE companies SET status = ?, updated_at = ? WHERE id = ?",
+        (status, datetime.now(timezone.utc).isoformat(), company_id),
+    )
+    await conn.commit()
+
+
+async def update_company_result(conn: aiosqlite.Connection, company_id: int, result: str) -> None:
+    await conn.execute(
+        "UPDATE companies SET result = ?, updated_at = ? WHERE id = ?",
+        (result, datetime.now(timezone.utc).isoformat(), company_id),
+    )
+    await conn.commit()
+
+
+async def get_open_action_for_company(conn: aiosqlite.Connection, company_id: int) -> Action | None:
+    cursor = await conn.execute(
+        f"SELECT {_ACTION_COLUMNS} FROM actions WHERE company_id = ? AND status = 'pending' "
+        "ORDER BY due_date DESC LIMIT 1",
+        (company_id,),
+    )
+    row = await cursor.fetchone()
+    return _row_to_action(row) if row else None
+
+
+# ---- Учёт дохода ----
+
+
+async def insert_payment(
+    conn: aiosqlite.Connection,
+    *,
+    amount: int,
+    received_at: date,
+    currency: str = "RUB",
+    company_id: int | None = None,
+    lead_id: int | None = None,
+    note: str | None = None,
+) -> int:
+    cursor = await conn.execute(
+        "INSERT INTO payments(amount, currency, received_at, lead_id, company_id, note, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            amount,
+            currency,
+            received_at.isoformat(),
+            lead_id,
+            company_id,
+            note,
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+    await conn.commit()
+    return int(cursor.lastrowid or 0)
+
+
+async def get_income_for_period(conn: aiosqlite.Connection, start: date, end: date) -> int:
+    """[start, end) - end не включается."""
+    cursor = await conn.execute(
+        "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE received_at >= ? AND received_at < ?",
+        (start.isoformat(), end.isoformat()),
+    )
+    row = await cursor.fetchone()
+    return int(row[0]) if row else 0
+
+
+# ---- hh.ru: собственные отклики ----
+
+_HH_APP_COLUMNS = (
+    "id, vacancy_id, vacancy_title, vacancy_url, state, hh_created_at, hh_updated_at, "
+    "last_synced_at, last_notified_state"
+)
+
+
+def _row_to_hh_application(row: aiosqlite.Row) -> HhApplication:
+    return HhApplication(
+        id=row["id"],
+        vacancy_id=row["vacancy_id"],
+        vacancy_title=row["vacancy_title"],
+        vacancy_url=row["vacancy_url"],
+        state=row["state"],
+        hh_created_at=datetime.fromisoformat(row["hh_created_at"]) if row["hh_created_at"] else None,
+        hh_updated_at=datetime.fromisoformat(row["hh_updated_at"]) if row["hh_updated_at"] else None,
+        last_synced_at=datetime.fromisoformat(row["last_synced_at"]) if row["last_synced_at"] else None,
+        last_notified_state=row["last_notified_state"],
+    )
+
+
+async def get_hh_application(conn: aiosqlite.Connection, app_id: str) -> HhApplication | None:
+    cursor = await conn.execute(
+        f"SELECT {_HH_APP_COLUMNS} FROM hh_applications WHERE id = ?", (app_id,)
+    )
+    row = await cursor.fetchone()
+    return _row_to_hh_application(row) if row else None
+
+
+async def list_hh_applications(conn: aiosqlite.Connection) -> list[HhApplication]:
+    cursor = await conn.execute(
+        f"SELECT {_HH_APP_COLUMNS} FROM hh_applications ORDER BY hh_updated_at DESC"
+    )
+    rows = await cursor.fetchall()
+    return [_row_to_hh_application(r) for r in rows]
+
+
+async def upsert_hh_application(conn: aiosqlite.Connection, app: HhApplication) -> None:
+    """Обновляет состояние отклика. last_notified_state не трогается - им управляет только
+    mark_hh_application_notified, иначе неудачная отправка уведомления потеряется молча."""
+    now = datetime.now(timezone.utc).isoformat()
+    await conn.execute(
+        """
+        INSERT INTO hh_applications(
+            id, vacancy_id, vacancy_title, vacancy_url, state, hh_created_at, hh_updated_at,
+            last_synced_at, last_notified_state
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+        ON CONFLICT(id) DO UPDATE SET
+            vacancy_id = excluded.vacancy_id,
+            vacancy_title = excluded.vacancy_title,
+            vacancy_url = excluded.vacancy_url,
+            state = excluded.state,
+            hh_created_at = excluded.hh_created_at,
+            hh_updated_at = excluded.hh_updated_at,
+            last_synced_at = excluded.last_synced_at
+        """,
+        (
+            app.id,
+            app.vacancy_id,
+            app.vacancy_title,
+            app.vacancy_url,
+            app.state,
+            app.hh_created_at.isoformat() if app.hh_created_at else None,
+            app.hh_updated_at.isoformat() if app.hh_updated_at else None,
+            now,
+        ),
+    )
+    await conn.commit()
+
+
+async def mark_hh_application_notified(conn: aiosqlite.Connection, app_id: str, state: str | None) -> None:
+    await conn.execute(
+        "UPDATE hh_applications SET last_notified_state = ? WHERE id = ?", (state, app_id)
+    )
+    await conn.commit()

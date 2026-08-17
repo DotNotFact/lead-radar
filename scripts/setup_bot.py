@@ -24,16 +24,26 @@ COMMANDS = [
     BotCommand(command="todo", description="Добавить задачу в очередь: /todo текст"),
     BotCommand(command="done", description="Отметить задачу выполненной: /done id"),
     BotCommand(command="snooze", description="Отложить задачу: /snooze id дней"),
+    BotCommand(command="crm", description="Список компаний в работе (CRM)"),
+    BotCommand(command="crm_add", description="Добавить компанию: /crm_add название"),
+    BotCommand(command="crm_touch", description="Записать касание: /crm_touch id дней [результат]"),
+    BotCommand(command="crm_status", description="Сменить статус компании: /crm_status id статус"),
+    BotCommand(command="income", description="Записать поступление: /income сумма [заметка]"),
+    BotCommand(command="goal", description="Цель дохода на месяц: /goal сумма"),
+    BotCommand(command="templates", description="Список шаблонов первого ответа"),
+    BotCommand(command="template", description="Получить текст шаблона: /template имя"),
+    BotCommand(command="hh_status", description="Статусы собственных откликов на hh.ru"),
 ]
 
 DESCRIPTION = (
     "Lead Radar — персональный радар заказов и очередь действий для .NET-разработчика.\n\n"
     "Следит за hh.ru, Kwork, Telegram-чатами и RSS-фидами удалённой работы, оценивает "
-    "релевантность и присылает сюда только то, что стоит внимания. Ничего не отвечает и не "
-    "пишет заказчикам от вашего имени — только читает и уведомляет."
+    "релевантность и присылает сюда только то, что стоит внимания. Плюс простой CRM, учёт "
+    "дохода и шаблоны ответов. Ничего не отвечает и не пишет заказчикам от вашего имени — "
+    "только читает и уведомляет."
 )
 
-SHORT_DESCRIPTION = "Радар заказов: hh.ru, Kwork, Telegram, RSS. Только уведомления, без автоответов."
+SHORT_DESCRIPTION = "Радар заказов: hh.ru, Kwork, Telegram, RSS + CRM и учёт дохода. Без автоответов."
 
 
 async def main() -> None:

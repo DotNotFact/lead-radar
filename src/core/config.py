@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     telegram_session_name: str = Field(default="lead_radar_collector")
     channel_id: int | None = Field(default=None)
 
+    hh_client_id: str = Field(default="")
+    hh_client_secret: str = Field(default="")
+    hh_redirect_uri: str = Field(default="")
+    hh_access_token: str = Field(default="")
+    hh_refresh_token: str = Field(default="")
+
     @field_validator("telegram_api_id", "channel_id", mode="before")
     @classmethod
     def _empty_string_to_none(cls, value: Any) -> Any:

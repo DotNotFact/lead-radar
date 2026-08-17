@@ -12,10 +12,12 @@ from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from src.actions.brief import compose_daily_brief
 from src.actions.materializer import materialize_due_actions
 from src.control.chat_config import add_runtime_chat
+from src.control.templates import load_templates
 from src.core import repository
 from src.core.db import get_connection
-from src.core.models import Outcome
+from src.core.models import CompanyStatus, Outcome
 from src.core.yaml_config import load_actions_config
+from src.crm import service as crm_service
 from src.export.exporter import export_leads
 from src.export.stats import format_stats_message
 from src.notifier.keyboard import CALLBACK_PREFIX
@@ -26,6 +28,7 @@ router = Router(name="lead_radar")
 
 _VALID_OUTCOMES = set(get_args(Outcome))
 _OUTCOME_LABELS = {"replied": "Ответил", "ignored": "Мимо"}
+_VALID_COMPANY_STATUSES = set(get_args(CompanyStatus))
 
 
 def build_dispatcher() -> Dispatcher:
@@ -238,3 +241,176 @@ async def cmd_stats(message: Message, db_path: Path) -> None:
         await conn.close()
 
     await message.answer(format_stats_message(f"{days} дн.", conversion, budgets))
+
+
+_COMPANY_STATUS_LABELS = {
+    "new": "новый",
+    "contacted": "написал",
+    "negotiating": "переговоры",
+    "won": "выиграно",
+    "lost": "потеряно",
+    "on_hold": "пауза",
+}
+
+
+@router.message(Command("crm"))
+async def cmd_crm(message: Message, db_path: Path) -> None:
+    conn = await get_connection(db_path)
+    try:
+        companies = await repository.list_companies(conn, open_only=True)
+        lines = []
+        for company in companies:
+            next_touch = await repository.get_open_action_for_company(conn, company.id) if company.id else None
+            due = f", след. касание: {next_touch.due_date}" if next_touch and next_touch.due_date else ""
+            status_label = _COMPANY_STATUS_LABELS.get(company.status, company.status)
+            lines.append(f"[{company.id}] {company.name} — {status_label}{due}")
+    finally:
+        await conn.close()
+
+    if not lines:
+        await message.answer("В CRM пока нет компаний. Добавить: /crm_add <название>")
+        return
+    await message.answer("Компании в работе:\n" + "\n".join(lines))
+
+
+@router.message(Command("crm_add"))
+async def cmd_crm_add(message: Message, db_path: Path) -> None:
+    text = message.text or ""
+    _, _, name = text.partition(" ")
+    name = name.strip()
+    if not name:
+        await message.answer("Использование: /crm_add <название компании>")
+        return
+
+    conn = await get_connection(db_path)
+    try:
+        company_id = await crm_service.add_company(conn, name=name)
+    finally:
+        await conn.close()
+    await message.answer(f"Добавлено в CRM: [{company_id}] {name}. Первое касание — сегодня.")
+
+
+@router.message(Command("crm_touch"))
+async def cmd_crm_touch(message: Message, db_path: Path) -> None:
+    parts = (message.text or "").split(maxsplit=3)[1:]
+    if len(parts) < 2 or not parts[0].isdigit() or not parts[1].lstrip("-").isdigit():
+        await message.answer("Использование: /crm_touch <id> <дней до следующего касания> [результат]")
+        return
+
+    company_id = int(parts[0])
+    next_days = int(parts[1])
+    result = parts[2] if len(parts) > 2 else None
+
+    conn = await get_connection(db_path)
+    try:
+        if await repository.get_company(conn, company_id) is None:
+            await message.answer(f"Компания [{company_id}] не найдена.")
+            return
+        await crm_service.touch_company(
+            conn, company_id=company_id, next_touch_in_days=next_days, result=result
+        )
+    finally:
+        await conn.close()
+    await message.answer(f"Записано: [{company_id}], следующее касание через {next_days} дн.")
+
+
+@router.message(Command("crm_status"))
+async def cmd_crm_status(message: Message, db_path: Path) -> None:
+    parts = (message.text or "").split()[1:]
+    if len(parts) != 2 or not parts[0].isdigit() or parts[1] not in _VALID_COMPANY_STATUSES:
+        statuses = ", ".join(sorted(_VALID_COMPANY_STATUSES))
+        await message.answer(f"Использование: /crm_status <id> <статус>\nСтатусы: {statuses}")
+        return
+
+    company_id, status = int(parts[0]), parts[1]
+    conn = await get_connection(db_path)
+    try:
+        if await repository.get_company(conn, company_id) is None:
+            await message.answer(f"Компания [{company_id}] не найдена.")
+            return
+        await crm_service.set_company_status(conn, company_id, status)
+    finally:
+        await conn.close()
+    await message.answer(f"[{company_id}] — новый статус: {_COMPANY_STATUS_LABELS.get(status, status)}")
+
+
+@router.message(Command("income"))
+async def cmd_income(message: Message, db_path: Path) -> None:
+    parts = (message.text or "").split(maxsplit=2)[1:]
+    if not parts or not parts[0].isdigit():
+        await message.answer("Использование: /income <сумма> [заметка]")
+        return
+
+    amount = int(parts[0])
+    note = parts[1] if len(parts) > 1 else None
+
+    conn = await get_connection(db_path)
+    try:
+        await repository.insert_payment(conn, amount=amount, received_at=date.today(), note=note)
+    finally:
+        await conn.close()
+    await message.answer(f"Записано поступление: {amount} ₽")
+
+
+@router.message(Command("goal"))
+async def cmd_goal(message: Message, db_path: Path) -> None:
+    parts = (message.text or "").split()[1:]
+    if not parts or not parts[0].isdigit():
+        await message.answer("Использование: /goal <сумма в месяц>")
+        return
+
+    amount = int(parts[0])
+    conn = await get_connection(db_path)
+    try:
+        await repository.set_system_state(conn, repository.MONTHLY_GOAL_KEY, str(amount))
+    finally:
+        await conn.close()
+    await message.answer(f"Цель на месяц: {amount} ₽")
+
+
+@router.message(Command("templates"))
+async def cmd_templates(message: Message, config_dir: Path) -> None:
+    templates = load_templates(config_dir)
+    if not templates:
+        await message.answer("Шаблонов пока нет. Добавь их в config/templates.yaml.")
+        return
+
+    lines = [f"• {name} — {tmpl.get('title', name)}" for name, tmpl in templates.items()]
+    await message.answer("Доступные шаблоны:\n" + "\n".join(lines) + "\n\nПолучить текст: /template <имя>")
+
+
+@router.message(Command("template"))
+async def cmd_template(message: Message, config_dir: Path) -> None:
+    parts = (message.text or "").split(maxsplit=1)[1:]
+    if not parts:
+        await message.answer("Использование: /template <имя>")
+        return
+
+    name = parts[0].strip()
+    templates = load_templates(config_dir)
+    template = templates.get(name)
+    if template is None:
+        await message.answer(f"Шаблон «{name}» не найден. Список: /templates")
+        return
+
+    await message.answer(str(template.get("text", "")).strip())
+
+
+@router.message(Command("hh_status"))
+async def cmd_hh_status(message: Message, db_path: Path) -> None:
+    conn = await get_connection(db_path)
+    try:
+        applications = await repository.list_hh_applications(conn)
+    finally:
+        await conn.close()
+
+    if not applications:
+        await message.answer(
+            "Откликов на hh.ru пока нет в базе. Если HH_CLIENT_ID/SECRET/токены заполнены в "
+            ".env, синхронизация подтянет их автоматически; иначе см. "
+            "python -m scripts.hh_oauth_login в README.md."
+        )
+        return
+
+    lines = [f"• {a.vacancy_title or a.vacancy_id or a.id} — {a.state or '?'}" for a in applications]
+    await message.answer("Отклики на hh.ru:\n" + "\n".join(lines))
