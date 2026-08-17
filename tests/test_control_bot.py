@@ -9,10 +9,12 @@ import pytest
 from src.control.bot import (
     cmd_brief,
     cmd_done,
+    cmd_export,
     cmd_pause,
     cmd_resume,
     cmd_snooze,
     cmd_sources,
+    cmd_stats,
     cmd_todo,
     handle_outcome_callback,
 )
@@ -189,3 +191,48 @@ async def test_cmd_snooze_rejects_bad_args(tmp_path: Path) -> None:
     message = SimpleNamespace(text="/snooze abc", answer=AsyncMock())
     await cmd_snooze(message, db_path=db_path)
     assert "Использование" in message.answer.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_export_sends_csv_document(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    conn = await get_connection(db_path)
+    await repository.ensure_source(conn, "hh_ru", 1)
+    await repository.insert_lead(
+        conn, Lead(source_id="hh_ru", external_id="1", title="Тест", score=80)
+    )
+    await conn.close()
+
+    message = SimpleNamespace(text="/export 30", answer_document=AsyncMock())
+    await cmd_export(message, db_path=db_path)
+
+    message.answer_document.assert_called_once()
+    document = message.answer_document.call_args.args[0]
+    assert document.filename == "lead_radar_export_30d.csv"
+    assert b"hh_ru" in document.data
+
+
+@pytest.mark.asyncio
+async def test_cmd_export_defaults_to_30_days(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    message = SimpleNamespace(text="/export", answer_document=AsyncMock())
+    await cmd_export(message, db_path=db_path)
+    document = message.answer_document.call_args.args[0]
+    assert document.filename == "lead_radar_export_30d.csv"
+
+
+@pytest.mark.asyncio
+async def test_cmd_stats_reports_conversion(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    conn = await get_connection(db_path)
+    await repository.ensure_source(conn, "hh_ru", 1)
+    await repository.insert_lead(conn, Lead(source_id="hh_ru", external_id="1", score=80))
+    await conn.close()
+
+    message = SimpleNamespace(text="/stats 30d", answer=AsyncMock())
+    await cmd_stats(message, db_path=db_path)
+
+    message.answer.assert_called_once()
+    text = message.answer.call_args.args[0]
+    assert "hh_ru" in text
+    assert "30 дн." in text

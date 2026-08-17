@@ -1,0 +1,26 @@
+# systemd unit-шаблон для Linux (если система когда-нибудь переедет с Windows).
+# Замените /path/to/expensive-lead-collector-bot на реальный путь, затем:
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp scripts/lead-radar.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now lead-radar.service
+#
+# Пользовательский сервис (--user) не требует root и переживает только вход пользователя в
+# систему - для полностью безголового автозапуска на сервере используйте system-level unit
+# в /etc/systemd/system/ и включите linger: loginctl enable-linger <user>.
+
+[Unit]
+Description=Lead Radar - персональная система поиска заказов
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/expensive-lead-collector-bot
+ExecStart=/path/to/expensive-lead-collector-bot/.venv/bin/python -m src.main
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

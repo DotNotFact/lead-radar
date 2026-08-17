@@ -97,7 +97,14 @@ async def test_notify_pending_leads_sends_only_leads_above_threshold_once(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_notify_pending_leads_degrades_on_single_send_failure(tmp_path: Path) -> None:
+async def test_notify_pending_leads_degrades_on_single_send_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def _no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr("src.core.retry.asyncio.sleep", _no_sleep)
+
     db_path = tmp_path / "test.db"
     await apply_migrations(db_path, MIGRATIONS_DIR)
     conn = await get_connection(db_path)
@@ -105,10 +112,19 @@ async def test_notify_pending_leads_degrades_on_single_send_failure(tmp_path: Pa
     await repository.insert_lead(conn, Lead(source_id="hh_ru", external_id="1", score=90))
     await repository.insert_lead(conn, Lead(source_id="hh_ru", external_id="2", score=95))
 
+    call_count = 0
+
+    async def flaky_send(*args: object, **kwargs: object) -> None:
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 4:  # исчерпывает все попытки retry_with_backoff (max_retries=3) для лида 1
+            raise RuntimeError("network blip")
+
     fake_bot = AsyncMock()
-    fake_bot.send_message.side_effect = [RuntimeError("network blip"), None]
+    fake_bot.send_message = AsyncMock(side_effect=flaky_send)
 
     sent = await notify_pending_leads(fake_bot, channel_id=-100123, conn=conn, threshold=50)
     await conn.close()
 
-    assert sent == 1  # второй лид всё равно отправлен, несмотря на сбой первого
+    assert sent == 1  # второй лид всё равно отправлен, несмотря на постоянный сбой первого
+    assert call_count == 5

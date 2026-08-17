@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import get_args
 
 from aiogram import Dispatcher, F, Router
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
 from src.actions.brief import compose_daily_brief
 from src.actions.materializer import materialize_due_actions
@@ -16,6 +16,8 @@ from src.core import repository
 from src.core.db import get_connection
 from src.core.models import Outcome
 from src.core.yaml_config import load_actions_config
+from src.export.exporter import export_leads
+from src.export.stats import format_stats_message
 from src.notifier.keyboard import CALLBACK_PREFIX
 
 logger = logging.getLogger("lead_radar.control.bot")
@@ -204,3 +206,35 @@ def _parse_id_arg(text: str | None) -> int | None:
     if len(parts) != 1 or not parts[0].isdigit():
         return None
     return int(parts[0])
+
+
+@router.message(Command("export"))
+async def cmd_export(message: Message, db_path: Path) -> None:
+    parts = (message.text or "").split()[1:]
+    days = int(parts[0]) if parts and parts[0].isdigit() else 30
+
+    conn = await get_connection(db_path)
+    try:
+        content = await export_leads(conn, days, "csv")
+    finally:
+        await conn.close()
+
+    filename = f"lead_radar_export_{days}d.csv"
+    await message.answer_document(BufferedInputFile(content, filename=filename))
+
+
+@router.message(Command("stats"))
+async def cmd_stats(message: Message, db_path: Path) -> None:
+    parts = (message.text or "").split()[1:]
+    period = parts[0] if parts else "7d"
+    days = 30 if period == "30d" else 7
+
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    conn = await get_connection(db_path)
+    try:
+        conversion = await repository.get_source_conversion_stats(conn, since)
+        budgets = await repository.get_budget_distribution(conn, since)
+    finally:
+        await conn.close()
+
+    await message.answer(format_stats_message(f"{days} дн.", conversion, budgets))

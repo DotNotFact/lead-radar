@@ -33,6 +33,7 @@ from src.core.db import apply_migrations, get_connection
 from src.core.logging_config import log_source_degraded, setup_logging
 from src.core.models import RawLead
 from src.core.pipeline import score_and_store_lead
+from src.core.retry import retry_with_backoff
 from src.core.yaml_config import (
     KeywordsConfig,
     SourceConfig,
@@ -41,6 +42,7 @@ from src.core.yaml_config import (
     load_keywords_config,
     load_sources_config,
 )
+from src.notifier.health_alerts import check_and_notify_source_health
 from src.notifier.notifier import notify_pending_leads
 
 logger = logging.getLogger("lead_radar.main")
@@ -97,6 +99,8 @@ async def _run_daily_brief_job(bot: Bot, settings: Settings) -> None:
     if not settings.channel_id:
         logger.warning("brief_skipped_no_channel_id")
         return
+    channel_id: int = settings.channel_id
+
     conn = await get_connection(settings.db_path)
     try:
         actions_config = load_actions_config(settings.config_dir)
@@ -105,7 +109,17 @@ async def _run_daily_brief_job(bot: Bot, settings: Settings) -> None:
         text = await compose_daily_brief(conn, today, settings.score_threshold)
     finally:
         await conn.close()
-    await bot.send_message(chat_id=settings.channel_id, text=text)
+    await retry_with_backoff(lambda: bot.send_message(chat_id=channel_id, text=text))
+
+
+async def _run_source_health_job(bot: Bot, settings: Settings) -> None:
+    if not settings.channel_id:
+        return
+    conn = await get_connection(settings.db_path)
+    try:
+        await check_and_notify_source_health(bot, settings.channel_id, conn)
+    finally:
+        await conn.close()
 
 
 async def _start_telegram(settings: Settings, telegram_config: SourceConfig, keywords_config: KeywordsConfig) -> Any:
@@ -218,6 +232,13 @@ async def main() -> None:
 
     scheduler.add_job(
         _run_notify_job, IntervalTrigger(seconds=60), args=[bot, settings], id="notify_pending"
+    )
+
+    scheduler.add_job(
+        _run_source_health_job,
+        IntervalTrigger(seconds=300),
+        args=[bot, settings],
+        id="source_health_alerts",
     )
 
     hour_str, minute_str = settings.daily_brief_time.split(":")

@@ -361,6 +361,19 @@ async def get_daily_stats(conn: aiosqlite.Connection, today: date, threshold: fl
     }
 
 
+def _degraded_notified_key(source_id: str) -> str:
+    return f"degraded_notified:{source_id}"
+
+
+async def was_degradation_notified(conn: aiosqlite.Connection, source_id: str) -> bool:
+    value = await get_system_state(conn, _degraded_notified_key(source_id))
+    return value == "1"
+
+
+async def set_degradation_notified(conn: aiosqlite.Connection, source_id: str, notified: bool) -> None:
+    await set_system_state(conn, _degraded_notified_key(source_id), "1" if notified else "0")
+
+
 async def get_degraded_sources(conn: aiosqlite.Connection) -> list[dict[str, Any]]:
     cursor = await conn.execute(
         "SELECT id, last_error, consecutive_failures FROM sources WHERE consecutive_failures > 0"
@@ -374,6 +387,65 @@ async def get_degraded_sources(conn: aiosqlite.Connection) -> list[dict[str, Any
         }
         for row in rows
     ]
+
+
+async def get_source_conversion_stats(conn: aiosqlite.Connection, since: datetime) -> list[dict[str, Any]]:
+    cursor = await conn.execute(
+        """
+        SELECT
+            l.source_id,
+            COUNT(*) AS collected,
+            SUM(CASE WHEN lo.notified_at IS NOT NULL THEN 1 ELSE 0 END) AS notified,
+            SUM(CASE WHEN lo.outcome = 'replied' THEN 1 ELSE 0 END) AS replied,
+            SUM(CASE WHEN lo.outcome = 'won' THEN 1 ELSE 0 END) AS won
+        FROM leads l
+        LEFT JOIN lead_outcomes lo ON lo.lead_id = l.id
+        WHERE l.collected_at >= ? AND l.duplicate_of IS NULL
+        GROUP BY l.source_id
+        ORDER BY collected DESC
+        """,
+        (since.isoformat(),),
+    )
+    rows = await cursor.fetchall()
+    return [
+        {
+            "source_id": row["source_id"],
+            "collected": row["collected"],
+            "notified": row["notified"] or 0,
+            "replied": row["replied"] or 0,
+            "won": row["won"] or 0,
+        }
+        for row in rows
+    ]
+
+
+_BUDGET_BUCKETS: list[tuple[int, int | None]] = [
+    (0, 5000),
+    (5000, 10000),
+    (10000, 30000),
+    (30000, 100000),
+    (100000, None),
+]
+
+
+async def get_budget_distribution(conn: aiosqlite.Connection, since: datetime) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for low, high in _BUDGET_BUCKETS:
+        if high is None:
+            cursor = await conn.execute(
+                "SELECT COUNT(*) FROM leads WHERE collected_at >= ? AND duplicate_of IS NULL "
+                "AND budget_max >= ?",
+                (since.isoformat(), low),
+            )
+        else:
+            cursor = await conn.execute(
+                "SELECT COUNT(*) FROM leads WHERE collected_at >= ? AND duplicate_of IS NULL "
+                "AND budget_max >= ? AND budget_max < ?",
+                (since.isoformat(), low, high),
+            )
+        row = await cursor.fetchone()
+        result.append({"low": low, "high": high, "count": row[0] if row else 0})
+    return result
 
 
 async def get_outcome(conn: aiosqlite.Connection, lead_id: int) -> LeadOutcome | None:

@@ -7,6 +7,7 @@ from aiogram import Bot
 
 from src.core import repository
 from src.core.models import Lead
+from src.core.retry import retry_with_backoff
 from src.notifier.formatter import format_lead_message
 from src.notifier.keyboard import build_lead_keyboard
 
@@ -21,11 +22,13 @@ async def send_lead_notification(
     if lead.id is None:
         raise ValueError("Lead должен быть сохранён в БД перед отправкой уведомления")
 
-    await bot.send_message(
-        chat_id=channel_id,
-        text=format_lead_message(lead),
-        reply_markup=build_lead_keyboard(lead),
-        disable_web_page_preview=True,
+    await retry_with_backoff(
+        lambda: bot.send_message(
+            chat_id=channel_id,
+            text=format_lead_message(lead),
+            reply_markup=build_lead_keyboard(lead),
+            disable_web_page_preview=True,
+        )
     )
     await repository.record_notified(conn, lead.id)
     logger.info("lead_notified", extra={"lead_id": lead.id, "source_id": lead.source_id})
