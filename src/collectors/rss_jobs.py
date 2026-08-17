@@ -36,7 +36,6 @@ class RssJobsCollector:
             for url in self.feed_urls:
                 try:
                     response = await request_with_retry(client, "GET", url)
-                    response.raise_for_status()
                     parsed = await asyncio.to_thread(feedparser.parse, response.content)
                     if parsed.bozo and not parsed.entries:
                         raise SourceUnavailableError(

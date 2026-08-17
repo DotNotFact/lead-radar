@@ -90,7 +90,6 @@ class HhRuCollector:
                 params["schedule"] = "remote"
 
             response = await request_with_retry(client, "GET", "/vacancies", params=params)
-            response.raise_for_status()
             payload = response.json()
 
             for item in payload.get("items", []):
@@ -103,7 +102,6 @@ class HhRuCollector:
 
     async def fetch_full_description(self, client: httpx.AsyncClient, vacancy_id: str) -> dict[str, Any]:
         response = await request_with_retry(client, "GET", f"/vacancies/{vacancy_id}")
-        response.raise_for_status()
         result: dict[str, Any] = response.json()
         return result
 

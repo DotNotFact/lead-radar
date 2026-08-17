@@ -87,7 +87,6 @@ class KworkProjectsCollector:
         try:
             async with httpx.AsyncClient(headers={"User-Agent": self._user_agent}, timeout=20.0) as client:
                 response = await request_with_retry(client, "GET", self._URL)
-                response.raise_for_status()
                 state = _extract_state_data(response.text)
                 items = _get_projects_list(state)
         except SourceUnavailableError as exc:
@@ -169,7 +168,6 @@ class KworkCatalogCollector:
                     await asyncio.sleep(self._min_request_interval)
                 try:
                     response = await request_with_retry(client, "GET", url)
-                    response.raise_for_status()
                     state = _extract_state_data(response.text)
                     items = _get_catalog_list(state)
                 except SourceUnavailableError as exc:

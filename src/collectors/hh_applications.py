@@ -91,6 +91,8 @@ class HhApplicationsClient:
                 "client_id": self.client_id,
                 "client_secret": self.client_secret,
             },
+            # сами решаем, что делать с неуспехом (HhOAuthError, не SourceUnavailableError)
+            passthrough_statuses=frozenset(range(400, 500)),
         )
         if response.status_code != 200:
             raise HhOAuthError(
@@ -123,6 +125,8 @@ class HhApplicationsClient:
                 NEGOTIATIONS_URL,
                 params={"page": page, "per_page": 50},
                 headers={"Authorization": f"Bearer {self.access_token}"},
+                # сами решаем: 401/403 -> рефреш токена, а не сразу SourceUnavailableError
+                passthrough_statuses=frozenset({401, 403}),
             )
 
             if response.status_code in (401, 403) and not refreshed_once:

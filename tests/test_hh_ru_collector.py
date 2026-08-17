@@ -78,3 +78,20 @@ async def test_fetch_raises_and_marks_unhealthy_on_persistent_5xx(monkeypatch: p
     health = await collector.health()
     assert health.ok is False
     assert health.consecutive_failures == 1
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_fetch_raises_source_unavailable_on_403_not_httpx_error() -> None:
+    """Регрессия: живой прогон против api.hh.ru поймал 403 (DDoS-Guard), который раньше
+    падал необработанным httpx.HTTPStatusError из response.raise_for_status() и ронял
+    scripts/collect_hh.py целиком, а не переводил источник в degraded (инвариант 6)."""
+    respx.get("https://api.hh.ru/vacancies").mock(return_value=httpx.Response(403))
+
+    collector = HhRuCollector(queries=["C#"], contact_email="test@example.com")
+
+    with pytest.raises(SourceUnavailableError):
+        await collector.fetch(datetime.now(timezone.utc) - timedelta(days=1))
+
+    health = await collector.health()
+    assert health.ok is False

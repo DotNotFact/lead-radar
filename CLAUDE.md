@@ -246,6 +246,23 @@ feedparser, SQLite + aiosqlite, APScheduler, pydantic-settings, pytest + pytest-
     роутером, а со всеми `sub_routers` собранного `Dispatcher` — иначе тест не заметил бы
     команды, зарегистрированные в `menu.py`.
   179 тестов, `mypy --strict` чист.
+- **Постфактум: живой прогон нашёл и исправил системный баг во всех HTTP-коллекторах.**
+  `response.raise_for_status()` после `request_with_retry` бросал необработанный
+  `httpx.HTTPStatusError` на любом 4xx, кроме 429 (429/5xx уже ретраились и превращались в
+  `SourceUnavailableError`, но 401/403/404 — нет) — и это ронял весь скрипт целиком вместо
+  аккуратного degraded (нарушение инварианта 6). Поймано вживую на `api.hh.ru`: DDoS-Guard
+  отдал 403, `scripts/collect_hh.py` упал необработанным traceback'ом вместо
+  "источник недоступен, помечен degraded".
+  **Фикс в одном месте** (`src/core/http.py::request_with_retry`): любой финальный
+  неуспешный статус (не только 429/5xx) теперь сам превращается в `SourceUnavailableError`;
+  вызывающему коду `raise_for_status()` больше не нужен и он убран из
+  `hh_ru.py`/`kwork.py`/`rss_jobs.py` как мёртвый код. Добавлен параметр
+  `passthrough_statuses` для случаев, где вызывающий код обрабатывает статус сам — у
+  `hh_applications.py` он использован для 401/403 (нужно решить: рефрешить OAuth-токен или
+  сдаваться) и для ответа `/oauth/token` (нужно отличить `HhOAuthError` от прочего). Живой
+  повторный прогон `collect_hh` после фикса: `403` -> чистый `source_degraded` в логе, скрипт
+  не падает. 185 тестов (+6 новых: `tests/test_http.py` + регрессионный тест конкретно на
+  403 в `test_hh_ru_collector.py`), `mypy --strict` чист.
 
 ## КОМАНДЫ БОТА
 
