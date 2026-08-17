@@ -1,0 +1,44 @@
+# Скоринг лидов. Никаких магических чисел в коде — всё настраивается здесь.
+# Итоговый score — сумма весов сработавших сигналов (может быть отрицательным).
+
+positive_signals:
+  stack:
+    weight: 15
+    terms: ["c#", "c sharp", ".net", "asp.net", "ef core", "entity framework", "postgresql", "postgres", "docker", "redis", "rabbitmq"]
+  work_type_high_conversion:
+    weight: 10
+    terms: ["доработать", "починить", "исправить", "легаси", "интеграция", "api", "парсер", "telegram бот", "перенести", "не работает"]
+  adjacent_skills:
+    weight: 5
+    terms: ["wpf", "avalonia", "react", "typescript", "flutter"]
+  has_explicit_budget:
+    weight: 10
+  detailed_spec:
+    weight: 5
+    note: "длина текста выше медианы по накопленным лидам"
+  author_has_contact:
+    weight: 5
+    note: "у автора есть username/контакт"
+
+negative_signals:
+  unpaid_or_test:
+    weight: -30
+    terms: ["бесплатно", "за отзыв", "за портфолио", "тестовое задание", "на энтузиазме"]
+  equity_or_deferred:
+    weight: -20
+    terms: ["нужен партнёр", "доля в проекте", "оплата после запуска"]
+  stack_mismatch:
+    weight: -15
+    terms: ["python", "php", "1с", "1c", "java", "дизайн", "копирайтинг", "smm", "смм"]
+  junior_low_pay:
+    weight: -15
+    terms: ["junior", "стажёр"]
+    note: "срабатывает только в связке с явно низкой оплатой"
+  below_budget_floor:
+    weight: -25
+
+notification_threshold: 50  # ниже — пишется в БД для аналитики, но не отправляется владельцу
+
+budget_parsing:
+  currency_symbols: ["₽", "руб", "р.", "тыс", "к", "k", "$", "usdt"]
+  min_budget_rub: 5000  # используется как negative_signal.below_budget_floor порог, настраивается

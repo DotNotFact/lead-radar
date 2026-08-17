@@ -1,0 +1,28 @@
+# Секреты и локальные данные
+.env
+*.session
+*.session-journal
+*.db
+*.db-journal
+data/
+
+# Логи
+logs/*.log
+logs/*.log.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# Инструменты
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage

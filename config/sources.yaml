@@ -1,0 +1,60 @@
+# Источники лидов. Добавление нового источника = новый файл в src/collectors/ + запись здесь.
+# Никаких правок в ядре не требуется.
+#
+# tier: 1 = официальный API, 2 = RSS/HTML без API, 3 = ручной режим (в actions.yaml, не здесь)
+# poll_interval: секунды между опросами
+
+sources:
+  hh_ru:
+    tier: 1
+    enabled: true
+    poll_interval: 300
+    base_url: "https://api.hh.ru"
+    queries:
+      - "C#"
+      - ".NET"
+      - "ASP.NET Core"
+      - "бэкенд разработчик"
+    remote_only: true
+    fetch_full_description: true
+
+  telegram:
+    tier: 1
+    enabled: false  # включить в Фазе 2, когда будет готов Telethon-коллектор
+    poll_interval: 0  # реалтайм через event-хендлер + догоняющий опрос истории при старте
+    # Список чатов/каналов для чтения. Собрать 60-100 штук поиском по:
+    # "фриланс заказы", "работа программисту", "удалёнка IT", "подработка разработка", "C# вакансии".
+    # Формат записи: {handle: "@some_chat", note: "короткое описание, откуда взят"}
+    chats: []
+
+  rss_remote_jobs:
+    tier: 1
+    enabled: false  # найти и проверить рабочие фиды на этапе Фазы 1/4
+    poll_interval: 900
+    feeds: []  # {url: "...", note: "..."}  — нерабочие фиды помечать disabled: true с комментарием
+
+  kwork:
+    tier: 2
+    enabled: false  # Фаза 4
+    poll_interval: 86400  # раз в сутки, ночью — это не источник лидов реального времени
+    base_url: "https://kwork.ru"
+    categories: []  # категории разработки, заполнить на этапе реализации
+
+  fl_ru:
+    tier: 2
+    enabled: false  # Фаза 4 — сначала проверить наличие RSS
+    poll_interval: 600
+    base_url: "https://www.fl.ru"
+
+  habr_freelance:
+    tier: 2
+    enabled: false  # Фаза 4 — сначала проверить наличие RSS
+    poll_interval: 600
+    base_url: "https://freelance.habr.com"
+
+  avito:
+    tier: 3
+    enabled: false
+    note: >
+      Осознанно не парсится — на Avito нет потока заказов, там исполнители.
+      Ценность обратная: быть найденным. Живёт как повторяющиеся действия в config/actions.yaml.
