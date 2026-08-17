@@ -19,7 +19,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from scripts.collect_hh import collect_and_store
+from scripts.collect_hh import collect_and_store as collect_hh_and_store
+from scripts.collect_kwork import collect_kwork_catalog, collect_kwork_projects
+from scripts.collect_rss import collect_and_store as collect_rss_and_store
 from src.actions.brief import compose_daily_brief
 from src.actions.materializer import materialize_due_actions
 from src.collectors.telegram import TelegramCollector
@@ -29,7 +31,8 @@ from src.core import repository
 from src.core.config import Settings, get_settings
 from src.core.db import apply_migrations, get_connection
 from src.core.logging_config import log_source_degraded, setup_logging
-from src.core.models import Lead, RawLead
+from src.core.models import RawLead
+from src.core.pipeline import score_and_store_lead
 from src.core.yaml_config import (
     KeywordsConfig,
     SourceConfig,
@@ -39,9 +42,6 @@ from src.core.yaml_config import (
     load_sources_config,
 )
 from src.notifier.notifier import notify_pending_leads
-from src.scoring.budget import parse_budget
-from src.scoring.dedup import content_hash
-from src.scoring.scorer import score_lead
 
 logger = logging.getLogger("lead_radar.main")
 
@@ -58,7 +58,27 @@ async def _is_paused(settings: Settings) -> bool:
 async def _run_hh_job(settings: Settings, sources_config: SourcesConfig, keywords_config: KeywordsConfig) -> None:
     if await _is_paused(settings):
         return
-    await collect_and_store(settings, sources_config, keywords_config)
+    await collect_hh_and_store(settings, sources_config, keywords_config)
+
+
+async def _run_rss_job(settings: Settings, sources_config: SourcesConfig, keywords_config: KeywordsConfig) -> None:
+    if await _is_paused(settings):
+        return
+    await collect_rss_and_store(settings, sources_config, keywords_config)
+
+
+async def _run_kwork_projects_job(
+    settings: Settings, sources_config: SourcesConfig, keywords_config: KeywordsConfig
+) -> None:
+    if await _is_paused(settings):
+        return
+    await collect_kwork_projects(settings, sources_config, keywords_config)
+
+
+async def _run_kwork_catalog_job(settings: Settings, sources_config: SourcesConfig) -> None:
+    if await _is_paused(settings):
+        return
+    await collect_kwork_catalog(settings, sources_config)
 
 
 async def _run_notify_job(bot: Bot, settings: Settings) -> None:
@@ -86,32 +106,6 @@ async def _run_daily_brief_job(bot: Bot, settings: Settings) -> None:
     finally:
         await conn.close()
     await bot.send_message(chat_id=settings.channel_id, text=text)
-
-
-async def _store_raw_lead(conn: Any, raw: RawLead, keywords_config: KeywordsConfig) -> None:
-    budget = parse_budget(raw.text)
-    scoring = score_lead(raw.title, raw.text, raw.author_handle, budget, keywords_config)
-    hash_ = content_hash(f"{raw.title or ''} {raw.text or ''}")
-    duplicate_of = await repository.find_duplicate_by_hash(conn, hash_, raw.source_id)
-    lead = Lead(
-        source_id=raw.source_id,
-        external_id=raw.external_id,
-        url=raw.url,
-        title=raw.title,
-        text=raw.text,
-        published_at=raw.published_at,
-        budget_min=budget.budget_min,
-        budget_max=budget.budget_max,
-        budget_currency=budget.currency,
-        budget_confidence=budget.confidence,
-        stack_tags=scoring.stack_tags,
-        content_hash=hash_,
-        duplicate_of=duplicate_of,
-        score=scoring.score,
-        author_handle=raw.author_handle,
-        raw_meta=raw.meta,
-    )
-    await repository.insert_lead(conn, lead)
 
 
 async def _start_telegram(settings: Settings, telegram_config: SourceConfig, keywords_config: KeywordsConfig) -> Any:
@@ -144,14 +138,14 @@ async def _start_telegram(settings: Settings, telegram_config: SourceConfig, key
             await repository.mark_source_ok(conn, collector.source_id)
 
         for raw in raw_leads:
-            await _store_raw_lead(conn, raw, keywords_config)
+            await score_and_store_lead(conn, raw, keywords_config)
     finally:
         await conn.close()
 
     async def on_new_lead(raw: RawLead) -> None:
         realtime_conn = await get_connection(settings.db_path)
         try:
-            await _store_raw_lead(realtime_conn, raw, keywords_config)
+            await score_and_store_lead(realtime_conn, raw, keywords_config)
         finally:
             await realtime_conn.close()
 
@@ -185,6 +179,41 @@ async def main() -> None:
             IntervalTrigger(seconds=hh_config.poll_interval),
             args=[settings, sources_config, keywords_config],
             id="hh_ru_collect",
+        )
+
+    rss_config = sources_config.sources.get("rss_remote_jobs")
+    if rss_config is not None and rss_config.enabled and rss_config.poll_interval > 0:
+        scheduler.add_job(
+            _run_rss_job,
+            IntervalTrigger(seconds=rss_config.poll_interval),
+            args=[settings, sources_config, keywords_config],
+            id="rss_remote_jobs_collect",
+        )
+
+    kwork_projects_config = sources_config.sources.get("kwork_projects")
+    if (
+        kwork_projects_config is not None
+        and kwork_projects_config.enabled
+        and kwork_projects_config.poll_interval > 0
+    ):
+        scheduler.add_job(
+            _run_kwork_projects_job,
+            IntervalTrigger(seconds=kwork_projects_config.poll_interval),
+            args=[settings, sources_config, keywords_config],
+            id="kwork_projects_collect",
+        )
+
+    kwork_catalog_config = sources_config.sources.get("kwork_catalog")
+    if (
+        kwork_catalog_config is not None
+        and kwork_catalog_config.enabled
+        and kwork_catalog_config.poll_interval > 0
+    ):
+        scheduler.add_job(
+            _run_kwork_catalog_job,
+            IntervalTrigger(seconds=kwork_catalog_config.poll_interval),
+            args=[settings, sources_config],
+            id="kwork_catalog_collect",
         )
 
     scheduler.add_job(

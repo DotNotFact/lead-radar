@@ -22,3 +22,15 @@ def test_settings_reads_env_file(tmp_path, monkeypatch) -> None:  # type: ignore
 
     assert settings.bot_token == "test-token"
     assert settings.score_threshold == 75
+
+
+def test_settings_treats_blank_optional_int_env_as_none(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    # .env.example ставит TELEGRAM_API_ID= и CHANNEL_ID= пустыми до заполнения владельцем -
+    # pydantic иначе пытается распарсить "" как int и падает на каждом запуске.
+    env_file = tmp_path / ".env"
+    env_file.write_text("TELEGRAM_API_ID=\nCHANNEL_ID=\n", encoding="utf-8")
+
+    settings = Settings(_env_file=str(env_file))  # type: ignore[call-arg]
+
+    assert settings.telegram_api_id is None
+    assert settings.channel_id is None

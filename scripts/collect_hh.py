@@ -15,11 +15,8 @@ from src.core.config import Settings, get_settings
 from src.core.db import apply_migrations, get_connection
 from src.core.http import SourceUnavailableError
 from src.core.logging_config import log_source_degraded, setup_logging
-from src.core.models import Lead
+from src.core.pipeline import score_and_store_lead
 from src.core.yaml_config import KeywordsConfig, SourcesConfig, load_keywords_config, load_sources_config
-from src.scoring.budget import parse_budget
-from src.scoring.dedup import content_hash
-from src.scoring.scorer import score_lead
 
 logger = logging.getLogger("lead_radar.scripts.collect_hh")
 
@@ -76,7 +73,6 @@ async def collect_and_store(
             timeout=20.0,
         ) as client:
             for raw in raw_leads:
-                text = raw.text
                 if fetch_full:
                     try:
                         detail = await collector.fetch_full_description(client, raw.external_id)
@@ -85,38 +81,12 @@ async def collect_and_store(
                     if detail:
                         description = detail.get("description")
                         if description:
-                            text = _strip_html(description)
+                            raw.text = _strip_html(description)
                         skills = [s["name"] for s in detail.get("key_skills", [])]
                         if skills:
                             raw.meta["key_skills"] = skills
 
-                budget = parse_budget(raw.raw_budget or text)
-                scoring = score_lead(raw.title, text, raw.author_handle, budget, keywords_config)
-
-                hash_ = content_hash(f"{raw.title or ''} {text or ''}")
-                duplicate_of = await repository.find_duplicate_by_hash(
-                    conn, hash_, collector.source_id
-                )
-
-                lead = Lead(
-                    source_id=raw.source_id,
-                    external_id=raw.external_id,
-                    url=raw.url,
-                    title=raw.title,
-                    text=text,
-                    published_at=raw.published_at,
-                    budget_min=budget.budget_min,
-                    budget_max=budget.budget_max,
-                    budget_currency=budget.currency,
-                    budget_confidence=budget.confidence,
-                    stack_tags=scoring.stack_tags,
-                    content_hash=hash_,
-                    duplicate_of=duplicate_of,
-                    score=scoring.score,
-                    author_handle=raw.author_handle,
-                    raw_meta=raw.meta,
-                )
-                inserted = await repository.insert_lead(conn, lead)
+                inserted = await score_and_store_lead(conn, raw, keywords_config)
                 if inserted:
                     new_count += 1
                 else:

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +18,15 @@ class Settings(BaseSettings):
     telegram_api_hash: str | None = Field(default=None)
     telegram_session_name: str = Field(default="lead_radar_collector")
     channel_id: int | None = Field(default=None)
+
+    @field_validator("telegram_api_id", "channel_id", mode="before")
+    @classmethod
+    def _empty_string_to_none(cls, value: Any) -> Any:
+        # Поля "ещё не заполнены владельцем" стоят в .env как TELEGRAM_API_ID= (пустая строка).
+        # pydantic иначе пытается распарсить "" как int и падает при каждом запуске.
+        if isinstance(value, str) and value.strip() == "":
+            return None
+        return value
 
     db_path: Path = Field(default=Path("data/lead_radar.db"))
 

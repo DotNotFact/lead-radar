@@ -34,28 +34,59 @@ sources:
 
   rss_remote_jobs:
     tier: 1
-    enabled: false  # найти и проверить рабочие фиды на этапе Фазы 1/4
+    enabled: true
     poll_interval: 900
-    feeds: []  # {url: "...", note: "..."}  — нерабочие фиды помечать disabled: true с комментарием
+    feeds:
+      # Проверено вручную 2026-08-17: 200 OK, валидный RSS 2.0, robots.txt (User-agent: *)
+      # разрешает / (только /admin, /account и т.п. под запретом - фида это не касается).
+      - url: "https://weworkremotely.com/categories/remote-programming-jobs.rss"
+        note: "We Work Remotely - Programming, живой фид"
+      # RemoteOK: RSS-эндпоинты (remote-dev-jobs.rss и т.п.) отдают 410 Gone - RSS у них
+      # похоже отключён. Есть JSON API на /api, но это не feedparser/RSS - вне рамок этого
+      # коллектора. Оставлено отключённым, не удалено, чтобы не искать повторно.
+      - url: "https://remoteok.com/remote-dev-jobs.rss"
+        disabled: true
+        note: "410 Gone на 2026-08-17 - RSS отключён у RemoteOK, есть только JSON /api"
 
-  kwork:
+  # kwork.ru/robots.txt (User-agent: *) не запрещает ни /projects, ни /categories/*, но явно
+  # запрещает пагинацию: "Disallow: /*?page=" и "/*&page=" - поэтому оба коллектора берут
+  # только первую страницу за опрос. Это уважение robots.txt, а не техническое ограничение.
+  kwork_projects:
     tier: 2
-    enabled: false  # Фаза 4
-    poll_interval: 86400  # раз в сутки, ночью — это не источник лидов реального времени
-    base_url: "https://kwork.ru"
-    categories: []  # категории разработки, заполнить на этапе реализации
+    enabled: true  # Фаза 4 — раздел проектов заказчиков, реальные лиды (без авторизации доступен)
+    poll_interval: 900
+    note: "Только первая страница /projects - пагинация ?page= запрещена robots.txt"
 
+  kwork_catalog:
+    tier: 2
+    enabled: true  # Фаза 4 — каталог услуг фрилансеров, только аналитика спроса, НЕ лиды
+    poll_interval: 86400  # раз в сутки, ночью
+    min_request_interval_seconds: 10  # вежливый парсинг: 1 запрос/10 сек на домен между категориями
+    categories:
+      - "https://kwork.ru/categories/website-repair/dorabotka-sayta"
+      - "https://kwork.ru/categories/software/drugie-na-zakaz"
+      - "https://kwork.ru/categories/script-programming/skripty"
+    note: >
+      Эти записи получают score=None и никогда не уведомляются - это листинги услуг других
+      фрилансеров (конкурентов), а не запросы заказчиков. Только для /stats и экспорта.
+
+  # fl.ru/robots.txt: "User-agent: *" явно запрещает "/catalog*" (каталог проектов - как раз то,
+  # что нужно парсить) и "*/rss/*" (RSS тоже запрещён robots'ом). Источник не даётся - ручной
+  # режим, а не обход защиты (инвариант 7).
   fl_ru:
-    tier: 2
-    enabled: false  # Фаза 4 — сначала проверить наличие RSS
-    poll_interval: 600
-    base_url: "https://www.fl.ru"
+    tier: 3
+    enabled: false
+    note: >
+      robots.txt запрещает /catalog* и /rss/* для всех user-agent. Автоматический сбор
+      сознательно не реализован. Проверять вручную, пока правила не изменятся.
 
+  # freelance.habr.com/robots.txt: "User-agent: *" -> "Disallow: /" - запрещено ВСЁ.
   habr_freelance:
-    tier: 2
-    enabled: false  # Фаза 4 — сначала проверить наличие RSS
-    poll_interval: 600
-    base_url: "https://freelance.habr.com"
+    tier: 3
+    enabled: false
+    note: >
+      robots.txt запрещает весь сайт целиком (Disallow: /) для всех user-agent. Автоматический
+      сбор не реализован и не будет, пока сайт сам не отменит этот запрет.
 
   avito:
     tier: 3
