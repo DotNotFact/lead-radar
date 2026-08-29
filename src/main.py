@@ -184,7 +184,7 @@ async def _start_miniapp(settings: Settings) -> asyncio.Task[None] | None:
     uvicorn, поднятого как задача в том же event loop, что и бот. Без MINIAPP_OWNER_TELEGRAM_ID
     в .env просто не стартует (инвариант 6: деградация, не падение) - Mini App однопользовательский
     и без владельца бессмысленен, а не "работает, но всем подряд"."""
-    if settings.miniapp_owner_id is None:
+    if settings.miniapp_owner_telegram_id is None:
         logger.info("miniapp_disabled_no_owner_id")
         return None
 

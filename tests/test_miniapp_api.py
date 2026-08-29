@@ -24,7 +24,7 @@ async def _seed_db(tmp_path: Path) -> Path:
 def _client(db_path: Path, *, authenticated: bool = True) -> TestClient:
     def _override_settings() -> Settings:
         return Settings(  # type: ignore[call-arg]
-            _env_file=None, db_path=db_path, bot_token="test-token", miniapp_owner_id=777
+            _env_file=None, db_path=db_path, bot_token="test-token", miniapp_owner_telegram_id=777
         )
 
     app = create_app()

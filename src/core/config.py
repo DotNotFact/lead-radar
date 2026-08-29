@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     freelancer_oauth_token: str = Field(default="")
 
-    @field_validator("telegram_api_id", "channel_id", "miniapp_owner_id", mode="before")
+    @field_validator("telegram_api_id", "channel_id", "miniapp_owner_telegram_id", mode="before")
     @classmethod
     def _empty_string_to_none(cls, value: Any) -> Any:
         # Поля "ещё не заполнены владельцем" стоят в .env как TELEGRAM_API_ID= (пустая строка).
@@ -51,8 +51,8 @@ class Settings(BaseSettings):
     daily_brief_time: str = Field(default="09:00")
 
     # Telegram Mini App (см. docs/miniapp-brief.md) - однопользовательский, второго владельца
-    # не бывает: miniapp_owner_id сверяется с user.id из initData на каждом запросе.
-    miniapp_owner_id: int | None = Field(default=None)
+    # не бывает: miniapp_owner_telegram_id сверяется с user.id из initData на каждом запросе.
+    miniapp_owner_telegram_id: int | None = Field(default=None)
     miniapp_port: int = Field(default=8765)
 
     @property

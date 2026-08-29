@@ -45,8 +45,8 @@ async def require_owner(
     settings: Annotated[Settings, Depends(_get_settings)],
     authorization: Annotated[str | None, Header()] = None,
 ) -> TelegramUser:
-    if settings.miniapp_owner_id is None:
-        logger.error("miniapp_owner_id_not_configured")
+    if settings.miniapp_owner_telegram_id is None:
+        logger.error("miniapp_owner_telegram_id_not_configured")
         raise HTTPException(status_code=500, detail="MINIAPP_OWNER_TELEGRAM_ID не настроен в .env")
 
     if not authorization or not authorization.startswith("tma "):
@@ -58,7 +58,7 @@ async def require_owner(
         raise HTTPException(status_code=500, detail="BOT_TOKEN не настроен в .env")
 
     try:
-        return validate_init_data(init_data, bot_token=settings.bot_token, owner_id=settings.miniapp_owner_id)
+        return validate_init_data(init_data, bot_token=settings.bot_token, owner_id=settings.miniapp_owner_telegram_id)
     except InitDataAuthError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
