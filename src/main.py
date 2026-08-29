@@ -20,8 +20,11 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+from scripts.collect_freelancer import collect_and_store as collect_freelancer_and_store
+from scripts.collect_freelancer import is_configured as freelancer_configured
 from scripts.collect_hh import collect_and_store as collect_hh_and_store
 from scripts.collect_kwork import collect_kwork_catalog, collect_kwork_projects
+from scripts.collect_remoteok import collect_and_store as collect_remoteok_and_store
 from scripts.collect_rss import collect_and_store as collect_rss_and_store
 from scripts.sync_hh_applications import is_configured as hh_applications_configured
 from scripts.sync_hh_applications import sync_hh_applications
@@ -74,6 +77,22 @@ async def _run_rss_job(settings: Settings, sources_config: SourcesConfig, keywor
     if await _is_paused(settings):
         return
     await collect_rss_and_store(settings, sources_config, keywords_config)
+
+
+async def _run_remoteok_job(
+    settings: Settings, sources_config: SourcesConfig, keywords_config: KeywordsConfig
+) -> None:
+    if await _is_paused(settings):
+        return
+    await collect_remoteok_and_store(settings, sources_config, keywords_config)
+
+
+async def _run_freelancer_job(
+    settings: Settings, sources_config: SourcesConfig, keywords_config: KeywordsConfig
+) -> None:
+    if await _is_paused(settings):
+        return
+    await collect_freelancer_and_store(settings, sources_config, keywords_config)
 
 
 async def _run_kwork_projects_job(
@@ -231,6 +250,29 @@ async def main() -> None:
             IntervalTrigger(seconds=rss_config.poll_interval),
             args=[settings, sources_config, keywords_config],
             id="rss_remote_jobs_collect",
+        )
+
+    remoteok_config = sources_config.sources.get("remoteok")
+    if remoteok_config is not None and remoteok_config.enabled and remoteok_config.poll_interval > 0:
+        scheduler.add_job(
+            _run_remoteok_job,
+            IntervalTrigger(seconds=remoteok_config.poll_interval),
+            args=[settings, sources_config, keywords_config],
+            id="remoteok_collect",
+        )
+
+    freelancer_config = sources_config.sources.get("freelancer")
+    if (
+        freelancer_config is not None
+        and freelancer_config.enabled
+        and freelancer_config.poll_interval > 0
+        and freelancer_configured(settings)
+    ):
+        scheduler.add_job(
+            _run_freelancer_job,
+            IntervalTrigger(seconds=freelancer_config.poll_interval),
+            args=[settings, sources_config, keywords_config],
+            id="freelancer_collect",
         )
 
     kwork_projects_config = sources_config.sources.get("kwork_projects")

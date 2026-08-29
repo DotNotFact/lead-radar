@@ -11,6 +11,8 @@ SOURCE_DISPLAY_NAMES: dict[str, str] = {
     "fl_ru": "FL.ru",
     "habr_freelance": "Хабр Фриланс",
     "rss_remote_jobs": "RSS",
+    "remoteok": "RemoteOK",
+    "freelancer": "Freelancer.com",
 }
 
 _MAX_BODY_CHARS = 220
@@ -42,7 +44,8 @@ def _sanitize_tag(term: str) -> str:
 def format_lead_message(lead: Lead) -> str:
     source_name = SOURCE_DISPLAY_NAMES.get(lead.source_id, lead.source_id)
     score_str = f"{lead.score:.0f}" if lead.score is not None else "?"
-    header = f"{_hot_emoji(lead.score)} {score_str} | {source_name} | {_format_budget(lead)}"
+    ai_marker = " 🤖" if lead.ai_assistable else ""
+    header = f"{_hot_emoji(lead.score)} {score_str} | {source_name} | {_format_budget(lead)}{ai_marker}"
 
     body = (lead.title or lead.text or "").strip()
     if len(body) > _MAX_BODY_CHARS:

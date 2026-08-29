@@ -96,6 +96,20 @@ sources:
       - "@talentedpeoples"
       - "@cgfreelance"
 
+  # remoteok.com/robots.txt: "User-agent: *" -> "Allow: /" (Content-Signal: search=yes) -
+  # запрещены только известные AI-обучающие краулеры (Amazonbot, Bytespider и т.п.), которых
+  # мы не изображаем. Публичный JSON API, авторизация не нужна.
+  remoteok:
+    tier: 1
+    enabled: true
+    poll_interval: 1800
+    base_url: "https://remoteok.com/api"
+    queries:
+      - "c#"
+      - ".net"
+      - "asp.net"
+      - "backend"
+
   rss_remote_jobs:
     tier: 1
     enabled: true
@@ -133,6 +147,20 @@ sources:
     note: >
       Эти записи получают score=None и никогда не уведомляются - это листинги услуг других
       фрилансеров (конкурентов), а не запросы заказчиков. Только для /stats и экспорта.
+
+  # freelancer.com/robots.txt: "User-agent: *" не запрещает /projects* или API-путь целиком
+  # (запрещены только login/bidding/некоторые ajax-эндпоинты) - обращение через официальный
+  # API, не браузерный скрапинг.
+  freelancer:
+    tier: 1
+    enabled: false  # включить, когда в .env заполнен FREELANCER_OAUTH_TOKEN
+    poll_interval: 1800
+    base_url: "https://www.freelancer.com/api/projects/0.1"
+    queries:
+      - "C#"
+      - ".NET"
+      - "ASP.NET Core"
+    note: "Нужен FREELANCER_OAUTH_TOKEN в .env - см. README.md"
 
   # fl.ru/robots.txt: "User-agent: *" явно запрещает "/catalog*" (каталог проектов - как раз то,
   # что нужно парсить) и "*/rss/*" (RSS тоже запрещён robots'ом). Источник не даётся - ручной

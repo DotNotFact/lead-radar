@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     hh_access_token: str = Field(default="")
     hh_refresh_token: str = Field(default="")
 
+    freelancer_oauth_token: str = Field(default="")
+
     @field_validator("telegram_api_id", "channel_id", mode="before")
     @classmethod
     def _empty_string_to_none(cls, value: Any) -> Any:
