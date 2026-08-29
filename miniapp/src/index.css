@@ -1,0 +1,17 @@
+/* Тема полностью отдана @telegram-apps/telegram-ui (AppRoot + theme-params CSS-переменные,
+   см. src/main.tsx) - здесь только базовый сброс, никакой собственной палитры. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overscroll-behavior: none;
+}

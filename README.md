@@ -46,6 +46,7 @@ Telegram-чатами и RSS-фидами, оценивает релевантн
 | Порог скоринга, бюджеты, время брифа | Дефолты стоят в `.env` / `config/keywords.yaml`, но менять их проще прямо в боте — `/settings` или кнопка ⚙️ в `/menu`, без правки файлов и перезапуска |
 | `HH_CLIENT_ID`, `HH_CLIENT_SECRET`, `HH_REDIRECT_URI` | Опционально, для отслеживания собственных откликов на hh.ru. Зарегистрировать приложение на [dev.hh.ru/admin](https://dev.hh.ru/admin) (тип «Веб»), затем `python -m scripts.hh_oauth_login` — впишет `HH_ACCESS_TOKEN`/`HH_REFRESH_TOKEN` сам |
 | `FREELANCER_OAUTH_TOKEN` | Опционально, для источника `freelancer` (заказы с зарубежных клиентов). Личный токен, не ключ приложения: [accounts.freelancer.com/settings/develop](https://accounts.freelancer.com/settings/develop) → Sandbox/Live token. После заполнения переключить `freelancer.enabled: true` в `config/sources.yaml` |
+| `MINIAPP_OWNER_TELEGRAM_ID` | Опционально, для Telegram Mini App (см. ниже) — ваш numeric Telegram id, например через [@userinfobot](https://t.me/userinfobot). Без него Mini App не стартует |
 
 Источники `hh_ru`, `kwork_projects`, `kwork_catalog`, `rss_remote_jobs`, `remoteok` уже
 `enabled: true` и работают без доп. настройки. `freelancer` — `enabled: false`, пока не
@@ -134,6 +135,17 @@ migrations/    версионированные SQL-миграции
 tests/         pytest + pytest-asyncio, mypy --strict
 ```
 
+## Mini App
+
+Telegram Mini App (React + TypeScript, `miniapp/`) — веб-интерфейс поверх бота, открывается
+кнопкой прямо в чате. Первая итерация: экран источников со статусом здоровья и переключателем
+вкл/выкл. План остальных экранов и технические ограничения — `docs/miniapp-brief.md`,
+инструкции по разработке и сборке фронтенда — `miniapp/README.md`.
+
+Бэкенд (`src/webapp`) — часть основного процесса, стартует вместе с `python -m src.main`, если
+в `.env` заполнен `MINIAPP_OWNER_TELEGRAM_ID` (см. таблицу выше); без него просто не поднимается,
+остальной бот продолжает работать.
+
 ## Архитектура и принципы
 
 - Система только читает и уведомляет. Никаких автоматических откликов, сообщений или
@@ -175,4 +187,5 @@ tests/         pytest + pytest-asyncio, mypy --strict
 
 ## Статус
 
-Рабочий, используется каждый день. 229 тестов, `mypy --strict` чист.
+Рабочий, используется каждый день. Backend — 247 тестов, `mypy --strict` чист. Mini App
+(первый экран) — 7 тестов (Vitest + Testing Library + MSW), `oxlint` чист.
