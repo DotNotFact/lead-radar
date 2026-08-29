@@ -42,7 +42,7 @@ from src.core.models import RawLead
 from src.core.pipeline import score_and_store_lead
 from src.core.proxy import parse_telethon_proxy
 from src.core.retry import retry_with_backoff
-from src.core.runtime_settings import get_score_threshold
+from src.core.runtime_settings import get_score_threshold, get_source_enabled
 from src.core.yaml_config import (
     KeywordsConfig,
     SourceConfig,
@@ -67,14 +67,27 @@ async def _is_paused(settings: Settings) -> bool:
     return value == "1"
 
 
+async def _is_source_enabled(settings: Settings, source_id: str, *, default: bool) -> bool:
+    """Проверяется в начале каждого прогона job'ы - override из Mini App/бота (см.
+    runtime_settings.set_source_enabled) действует немедленно на источники, уже
+    зарегистрированные в планировщике на старте. Выключенный на старте источник (enabled: false
+    в sources.yaml или не хватает креденшлов) здесь не участвует - для него job вообще не
+    зарегистрирован, включить его можно только перезапуском процесса."""
+    conn = await get_connection(settings.db_path)
+    try:
+        return await get_source_enabled(conn, source_id, default=default)
+    finally:
+        await conn.close()
+
+
 async def _run_hh_job(settings: Settings, sources_config: SourcesConfig, keywords_config: KeywordsConfig) -> None:
-    if await _is_paused(settings):
+    if await _is_paused(settings) or not await _is_source_enabled(settings, "hh_ru", default=True):
         return
     await collect_hh_and_store(settings, sources_config, keywords_config)
 
 
 async def _run_rss_job(settings: Settings, sources_config: SourcesConfig, keywords_config: KeywordsConfig) -> None:
-    if await _is_paused(settings):
+    if await _is_paused(settings) or not await _is_source_enabled(settings, "rss_remote_jobs", default=True):
         return
     await collect_rss_and_store(settings, sources_config, keywords_config)
 
@@ -82,7 +95,7 @@ async def _run_rss_job(settings: Settings, sources_config: SourcesConfig, keywor
 async def _run_remoteok_job(
     settings: Settings, sources_config: SourcesConfig, keywords_config: KeywordsConfig
 ) -> None:
-    if await _is_paused(settings):
+    if await _is_paused(settings) or not await _is_source_enabled(settings, "remoteok", default=True):
         return
     await collect_remoteok_and_store(settings, sources_config, keywords_config)
 
@@ -90,7 +103,7 @@ async def _run_remoteok_job(
 async def _run_freelancer_job(
     settings: Settings, sources_config: SourcesConfig, keywords_config: KeywordsConfig
 ) -> None:
-    if await _is_paused(settings):
+    if await _is_paused(settings) or not await _is_source_enabled(settings, "freelancer", default=True):
         return
     await collect_freelancer_and_store(settings, sources_config, keywords_config)
 
@@ -98,13 +111,13 @@ async def _run_freelancer_job(
 async def _run_kwork_projects_job(
     settings: Settings, sources_config: SourcesConfig, keywords_config: KeywordsConfig
 ) -> None:
-    if await _is_paused(settings):
+    if await _is_paused(settings) or not await _is_source_enabled(settings, "kwork_projects", default=True):
         return
     await collect_kwork_projects(settings, sources_config, keywords_config)
 
 
 async def _run_kwork_catalog_job(settings: Settings, sources_config: SourcesConfig) -> None:
-    if await _is_paused(settings):
+    if await _is_paused(settings) or not await _is_source_enabled(settings, "kwork_catalog", default=True):
         return
     await collect_kwork_catalog(settings, sources_config)
 
@@ -164,6 +177,26 @@ async def _run_source_health_job(bot: Bot, settings: Settings) -> None:
         await check_and_notify_source_health(bot, settings.channel_id, conn)
     finally:
         await conn.close()
+
+
+async def _start_miniapp(settings: Settings) -> asyncio.Task[None] | None:
+    """Telegram Mini App (см. docs/miniapp-brief.md) - JSON API + отдача miniapp/dist поверх
+    uvicorn, поднятого как задача в том же event loop, что и бот. Без MINIAPP_OWNER_TELEGRAM_ID
+    в .env просто не стартует (инвариант 6: деградация, не падение) - Mini App однопользовательский
+    и без владельца бессмысленен, а не "работает, но всем подряд"."""
+    if settings.miniapp_owner_id is None:
+        logger.info("miniapp_disabled_no_owner_id")
+        return None
+
+    import uvicorn
+
+    from src.webapp.server import create_app
+
+    config = uvicorn.Config(create_app(), host="127.0.0.1", port=settings.miniapp_port, log_level="warning")
+    server = uvicorn.Server(config)
+    task = asyncio.create_task(server.serve())
+    logger.info("miniapp_started", extra={"port": settings.miniapp_port})
+    return task
 
 
 async def _start_telegram(settings: Settings, telegram_config: SourceConfig, keywords_config: KeywordsConfig) -> Any:
@@ -340,6 +373,8 @@ async def main() -> None:
     else:
         logger.info("telegram_source_disabled_or_unconfigured")
 
+    miniapp_task = await _start_miniapp(settings)
+
     scheduler.start()
     try:
         await dispatcher.start_polling(
@@ -353,6 +388,8 @@ async def main() -> None:
         scheduler.shutdown(wait=False)
         if telegram_client is not None:
             await telegram_client.disconnect()
+        if miniapp_task is not None:
+            miniapp_task.cancel()
 
 
 if __name__ == "__main__":

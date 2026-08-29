@@ -9,6 +9,7 @@ from src.core.yaml_config import KeywordsConfig
 _THRESHOLD_KEY = "override:score_threshold"
 _MIN_BUDGET_KEY = "override:min_budget_rub"
 _BRIEF_TIME_KEY = "override:daily_brief_time"
+_SOURCE_ENABLED_KEY_PREFIX = "override:source_enabled:"
 
 
 async def get_score_threshold(conn: aiosqlite.Connection, settings: Settings) -> float:
@@ -54,3 +55,17 @@ async def get_daily_brief_time(conn: aiosqlite.Connection, settings: Settings) -
 
 async def set_daily_brief_time(conn: aiosqlite.Connection, value: str) -> None:
     await repository.set_system_state(conn, _BRIEF_TIME_KEY, value)
+
+
+async def get_source_enabled(conn: aiosqlite.Connection, source_id: str, *, default: bool) -> bool:
+    """Опрашиваемые источники (не telegram - у него нет цикла опроса, см. is_pollable_source)
+    проверяют этот override в начале каждого прогона job'ы в main.py, поэтому выключение уже
+    запущенного источника действует немедленно, без перезапуска процесса. Включение источника,
+    который не был запущен на старте (enabled: false в sources.yaml или не хватает креденшлов),
+    так подхватить нельзя - job для него вообще не зарегистрирован в APScheduler."""
+    value = await repository.get_system_state(conn, f"{_SOURCE_ENABLED_KEY_PREFIX}{source_id}")
+    return default if value is None else value == "1"
+
+
+async def set_source_enabled(conn: aiosqlite.Connection, source_id: str, enabled: bool) -> None:
+    await repository.set_system_state(conn, f"{_SOURCE_ENABLED_KEY_PREFIX}{source_id}", "1" if enabled else "0")

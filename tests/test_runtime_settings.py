@@ -99,3 +99,28 @@ async def test_daily_brief_time_falls_back_and_can_be_overridden(tmp_path: Path)
     value = await runtime_settings.get_daily_brief_time(conn, settings)
     await conn.close()
     assert value == "14:30"
+
+
+@pytest.mark.asyncio
+async def test_source_enabled_falls_back_to_default_when_no_override(tmp_path: Path) -> None:
+    db_path = await _db(tmp_path)
+    conn = await get_connection(db_path)
+
+    assert await runtime_settings.get_source_enabled(conn, "hh_ru", default=True) is True
+    assert await runtime_settings.get_source_enabled(conn, "freelancer", default=False) is False
+    await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_set_source_enabled_overrides_default_independently_per_source(tmp_path: Path) -> None:
+    db_path = await _db(tmp_path)
+    conn = await get_connection(db_path)
+
+    await runtime_settings.set_source_enabled(conn, "hh_ru", False)
+    assert await runtime_settings.get_source_enabled(conn, "hh_ru", default=True) is False
+    # другой источник не затронут
+    assert await runtime_settings.get_source_enabled(conn, "remoteok", default=True) is True
+
+    await runtime_settings.set_source_enabled(conn, "hh_ru", True)
+    assert await runtime_settings.get_source_enabled(conn, "hh_ru", default=True) is True
+    await conn.close()
