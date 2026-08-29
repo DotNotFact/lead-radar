@@ -43,6 +43,7 @@ class Lead(BaseModel):
     score: float | None = None
     author_handle: str | None = None
     raw_meta: dict[str, Any] = {}
+    ai_assistable: bool = False
 
 
 class LeadOutcome(BaseModel):

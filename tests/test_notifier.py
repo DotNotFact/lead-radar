@@ -42,6 +42,18 @@ def test_format_lead_message_handles_missing_budget_and_score() -> None:
     assert text.startswith("📄 ? |")
 
 
+def test_format_lead_message_marks_ai_assistable_leads() -> None:
+    lead = Lead(id=3, source_id="rss_remote_jobs", external_id="3", title="Простой парсер", ai_assistable=True)
+    text = format_lead_message(lead)
+    assert "🤖" in text.splitlines()[0]
+
+
+def test_format_lead_message_omits_ai_marker_when_not_assistable() -> None:
+    lead = Lead(id=4, source_id="rss_remote_jobs", external_id="4", title="Сложный проект", ai_assistable=False)
+    text = format_lead_message(lead)
+    assert "🤖" not in text.splitlines()[0]
+
+
 def test_keyboard_requires_saved_lead() -> None:
     lead = Lead(source_id="hh_ru", external_id="1")
     with pytest.raises(ValueError):

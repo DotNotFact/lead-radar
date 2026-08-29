@@ -40,11 +40,17 @@ class BudgetParsingConfig(BaseModel):
     min_budget_rub: int
 
 
+class AiAssistableConfig(BaseModel):
+    budget_ceiling_rub: int
+    terms: list[str] = []
+
+
 class KeywordsConfig(BaseModel):
     positive_signals: dict[str, SignalConfig]
     negative_signals: dict[str, SignalConfig]
     notification_threshold: float
     budget_parsing: BudgetParsingConfig
+    ai_assistable: AiAssistableConfig
 
 
 def load_keywords_config(config_dir: Path) -> KeywordsConfig:

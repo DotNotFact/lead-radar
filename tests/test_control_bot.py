@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.control.bot import (
+    cmd_ai_leads,
     cmd_brief,
     cmd_crm,
     cmd_crm_add,
@@ -15,6 +16,7 @@ from src.control.bot import (
     cmd_crm_touch,
     cmd_done,
     cmd_export,
+    cmd_export_ai,
     cmd_goal,
     cmd_hh_status,
     cmd_income,
@@ -203,6 +205,71 @@ async def test_cmd_snooze_rejects_bad_args(tmp_path: Path) -> None:
     message = SimpleNamespace(text="/snooze abc", answer=AsyncMock())
     await cmd_snooze(message, db_path=db_path)
     assert "Использование" in message.answer.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_ai_leads_reports_no_leads_when_empty(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    message = SimpleNamespace(answer=AsyncMock())
+    await cmd_ai_leads(message, db_path=db_path)
+    assert "нет лидов" in message.answer.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_cmd_ai_leads_lists_only_flagged_leads(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    conn = await get_connection(db_path)
+    await repository.ensure_source(conn, "hh_ru", 1)
+    await repository.insert_lead(
+        conn,
+        Lead(source_id="hh_ru", external_id="1", title="Простой парсер", ai_assistable=True),
+    )
+    await repository.insert_lead(
+        conn,
+        Lead(source_id="hh_ru", external_id="2", title="Сложный проект", ai_assistable=False),
+    )
+    await conn.close()
+
+    message = SimpleNamespace(answer=AsyncMock())
+    await cmd_ai_leads(message, db_path=db_path)
+
+    text = message.answer.call_args.args[0]
+    assert "Простой парсер" in text
+    assert "Сложный проект" not in text
+
+
+@pytest.mark.asyncio
+async def test_cmd_export_ai_sends_document_with_only_flagged_leads(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    conn = await get_connection(db_path)
+    await repository.ensure_source(conn, "hh_ru", 1)
+    await repository.insert_lead(
+        conn,
+        Lead(source_id="hh_ru", external_id="1", title="Простой парсер", ai_assistable=True),
+    )
+    await repository.insert_lead(
+        conn,
+        Lead(source_id="hh_ru", external_id="2", title="Сложный проект", ai_assistable=False),
+    )
+    await conn.close()
+
+    message = SimpleNamespace(text="/export_ai 30", answer_document=AsyncMock())
+    await cmd_export_ai(message, db_path=db_path, config_dir=CONFIG_DIR)
+
+    message.answer_document.assert_called_once()
+    document = message.answer_document.call_args.args[0]
+    assert document.filename == "lead_radar_ai_export_30d.txt"
+    content = document.data.decode("utf-8")
+    assert "Простой парсер" in content
+    assert "Сложный проект" not in content
+
+
+@pytest.mark.asyncio
+async def test_cmd_export_ai_reports_when_nothing_flagged(tmp_path: Path) -> None:
+    db_path = await _seed_db(tmp_path)
+    message = SimpleNamespace(text="/export_ai", answer=AsyncMock())
+    await cmd_export_ai(message, db_path=db_path, config_dir=CONFIG_DIR)
+    assert "нет лидов" in message.answer.call_args.args[0]
 
 
 @pytest.mark.asyncio

@@ -26,8 +26,9 @@ _BRIEF_TIME_PRESETS = ["08:00", "09:00", "10:00", "12:00"]
 
 WELCOME_TEXT = (
     "👋 Lead Radar на связи.\n\n"
-    "Слежу за hh.ru, Kwork, Telegram-чатами и RSS, оцениваю релевантность и присылаю сюда "
-    "только то, что стоит внимания. Никогда не пишу заказчикам сам — это всегда делаешь ты.\n\n"
+    "Слежу за hh.ru, Kwork, RemoteOK, Freelancer.com, Telegram-чатами и RSS, оцениваю "
+    "релевантность и присылаю сюда только то, что стоит внимания. Никогда не пишу заказчикам "
+    "сам — это всегда делаешь ты.\n\n"
     "Выбирай раздел кнопками ниже или командами (/help — полный список)."
 )
 
@@ -36,7 +37,9 @@ HELP_TEXT = (
     "Лиды:\n"
     "/brief — бриф на сегодня\n"
     "/stats [7d|30d] — статистика\n"
+    "/ai_leads — лиды, которые можно закрыть с помощью ИИ\n"
     "/export [дней] — CSV-выгрузка (обезличенная)\n"
+    "/export_ai [дней] — только ИИ-лиды, готовый текст с промптом для внешнего ИИ\n"
     "/sources, /health — статус источников\n"
     "/pause, /resume — пауза/возобновление сбора\n"
     "/addchat @handle — добавить Telegram-чат\n\n"
@@ -47,8 +50,9 @@ HELP_TEXT = (
     "/crm_status <id> <статус>\n\n"
     "Доход:\n"
     "/income <сумма> [заметка], /goal <сумма>\n\n"
-    "Шаблоны:\n"
-    "/templates, /template <имя>\n\n"
+    "Шаблоны и промпты:\n"
+    "/templates, /template <имя> — готовые ответы заказчику\n"
+    "/prompts, /prompt <имя> — готовые промпты для внешнего ИИ (профиль на бирже и т.п.)\n\n"
     "hh.ru:\n"
     "/hh_status — статусы собственных откликов (нужен OAuth, см. README.md)\n\n"
     "Настройки:\n"
@@ -71,7 +75,10 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text="💰 Доход", callback_data="menu:income"),
             ],
             [
+                InlineKeyboardButton(text="🤖 ИИ-лиды", callback_data="menu:ai_leads"),
                 InlineKeyboardButton(text="📝 Шаблоны", callback_data="menu:templates"),
+            ],
+            [
                 InlineKeyboardButton(text="🔧 Источники", callback_data="menu:sources"),
             ],
             [
@@ -194,6 +201,9 @@ async def handle_menu_callback(
                 await _show(callback, "Статистика за период:", stats_menu_keyboard())
         elif action == "crm":
             text = await bot_module.crm_text(conn)
+            await _show(callback, text, back_keyboard())
+        elif action == "ai_leads":
+            text = await bot_module.ai_leads_text(conn)
             await _show(callback, text, back_keyboard())
         elif action == "income":
             text = await bot_module.income_text(conn)

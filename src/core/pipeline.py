@@ -6,6 +6,7 @@ from src.core import repository
 from src.core.models import Lead, RawLead
 from src.core.runtime_settings import apply_min_budget_override
 from src.core.yaml_config import KeywordsConfig
+from src.scoring.ai_filter import is_ai_assistable
 from src.scoring.budget import parse_budget
 from src.scoring.dedup import content_hash
 from src.scoring.scorer import score_lead
@@ -19,6 +20,7 @@ async def score_and_store_lead(
     keywords_config = await apply_min_budget_override(conn, keywords_config)
     budget = parse_budget(raw.raw_budget or raw.text)
     scoring = score_lead(raw.title, raw.text, raw.author_handle, budget, keywords_config)
+    ai_assistable = is_ai_assistable(raw.title, raw.text, budget, keywords_config.ai_assistable)
     hash_ = content_hash(f"{raw.title or ''} {raw.text or ''}")
     duplicate_of = await repository.find_duplicate_by_hash(conn, hash_, raw.source_id)
 
@@ -39,5 +41,6 @@ async def score_and_store_lead(
         score=scoring.score,
         author_handle=raw.author_handle,
         raw_meta=raw.meta,
+        ai_assistable=ai_assistable,
     )
     return await repository.insert_lead(conn, lead)

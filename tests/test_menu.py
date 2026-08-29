@@ -34,7 +34,7 @@ def test_main_menu_keyboard_has_all_sections() -> None:
     keyboard = menu.main_menu_keyboard()
     texts = {btn.text for row in keyboard.inline_keyboard for btn in row}
     assert texts == {
-        "📋 Бриф", "📊 Статистика", "🏢 CRM", "💰 Доход",
+        "📋 Бриф", "📊 Статистика", "🏢 CRM", "💰 Доход", "🤖 ИИ-лиды",
         "📝 Шаблоны", "🔧 Источники", "⚙️ Настройки", "❓ Помощь",
     }
 

@@ -23,6 +23,7 @@ async def test_migrations_apply_and_are_idempotent(tmp_path: Path) -> None:
     assert applied_first == sorted(applied_first)  # применяются по порядку имён файлов
     assert set(applied_first) == {
         "0001_init", "0002_system_state", "0003_crm_income", "0004_hh_applications",
+        "0005_ai_assistable",
     }
 
     applied_second = await apply_migrations(db_path, MIGRATIONS_DIR)

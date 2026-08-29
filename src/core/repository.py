@@ -33,7 +33,7 @@ def _row_to_action(row: aiosqlite.Row) -> Action:
 _LEAD_COLUMNS = (
     "id, source_id, external_id, url, title, text, published_at, collected_at, "
     "budget_min, budget_max, budget_currency, budget_confidence, stack_tags, "
-    "content_hash, duplicate_of, score, author_handle, raw_meta"
+    "content_hash, duplicate_of, score, author_handle, raw_meta, ai_assistable"
 )
 
 
@@ -57,6 +57,7 @@ def _row_to_lead(row: aiosqlite.Row) -> Lead:
         score=row["score"],
         author_handle=row["author_handle"],
         raw_meta=json.loads(row["raw_meta"]) if row["raw_meta"] else {},
+        ai_assistable=bool(row["ai_assistable"]),
     )
 
 
@@ -103,8 +104,9 @@ async def insert_lead(conn: aiosqlite.Connection, lead: Lead) -> bool:
         INSERT OR IGNORE INTO leads (
             source_id, external_id, url, title, text, published_at, collected_at,
             budget_min, budget_max, budget_currency, budget_confidence,
-            stack_tags, content_hash, duplicate_of, score, author_handle, raw_meta
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            stack_tags, content_hash, duplicate_of, score, author_handle, raw_meta,
+            ai_assistable
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             lead.source_id,
@@ -124,6 +126,7 @@ async def insert_lead(conn: aiosqlite.Connection, lead: Lead) -> bool:
             lead.score,
             lead.author_handle,
             json.dumps(lead.raw_meta, ensure_ascii=False),
+            int(lead.ai_assistable),
         ),
     )
     await conn.commit()
@@ -178,6 +181,23 @@ async def get_unnotified_leads_above_threshold(
         LIMIT ?
         """,
         (threshold, limit),
+    )
+    rows = await cursor.fetchall()
+    return [_row_to_lead(row) for row in rows]
+
+
+async def get_recent_ai_assistable_leads(conn: aiosqlite.Connection, limit: int = 20) -> list[Lead]:
+    """Лиды, помеченные как выполнимые с помощью ИИ (см. config/keywords.yaml -> ai_assistable),
+    для команды /ai_leads. Не фильтрует по дубликатам/уведомлённости - это отдельный обзорный
+    список, а не очередь уведомлений."""
+    cursor = await conn.execute(
+        f"""
+        SELECT {_LEAD_COLUMNS} FROM leads
+        WHERE ai_assistable = 1
+        ORDER BY published_at DESC
+        LIMIT ?
+        """,
+        (limit,),
     )
     rows = await cursor.fetchall()
     return [_row_to_lead(row) for row in rows]

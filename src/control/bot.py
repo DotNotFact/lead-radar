@@ -15,6 +15,7 @@ from apscheduler.triggers.cron import CronTrigger
 from src.actions.brief import compose_daily_brief, format_income_line
 from src.actions.materializer import materialize_due_actions
 from src.control.chat_config import add_runtime_chat
+from src.control.prompts import load_prompts
 from src.control.templates import load_templates
 from src.core import repository, runtime_settings
 from src.core.config import Settings
@@ -22,7 +23,7 @@ from src.core.db import get_connection
 from src.core.models import CompanyStatus, Outcome
 from src.core.yaml_config import load_actions_config, load_keywords_config
 from src.crm import service as crm_service
-from src.export.exporter import export_leads
+from src.export.exporter import export_leads, fetch_export_rows, render_ai_handoff
 from src.export.stats import format_stats_message
 from src.notifier.keyboard import CALLBACK_PREFIX
 
@@ -232,6 +233,31 @@ async def cmd_export(message: Message, db_path: Path) -> None:
     await message.answer_document(BufferedInputFile(content, filename=filename))
 
 
+@router.message(Command("export_ai"))
+async def cmd_export_ai(message: Message, db_path: Path, config_dir: Path) -> None:
+    parts = (message.text or "").split()[1:]
+    days = int(parts[0]) if parts and parts[0].isdigit() else 30
+
+    conn = await get_connection(db_path)
+    try:
+        rows = await fetch_export_rows(conn, days, ai_assistable_only=True)
+    finally:
+        await conn.close()
+
+    if not rows:
+        await message.answer(
+            f"За {days} дн. нет лидов, помеченных как выполнимые с помощью ИИ (см. /ai_leads)."
+        )
+        return
+
+    prompts = load_prompts(config_dir)
+    intro = str((prompts.get("lead_batch_for_ai") or {}).get("text", "")).strip()
+    content = render_ai_handoff(rows, intro)
+
+    filename = f"lead_radar_ai_export_{days}d.txt"
+    await message.answer_document(BufferedInputFile(content, filename=filename))
+
+
 async def stats_text(conn: aiosqlite.Connection, days: int) -> str:
     since = datetime.now(timezone.utc) - timedelta(days=days)
     conversion = await repository.get_source_conversion_stats(conn, since)
@@ -248,6 +274,35 @@ async def cmd_stats(message: Message, db_path: Path) -> None:
     conn = await get_connection(db_path)
     try:
         text = await stats_text(conn, days)
+    finally:
+        await conn.close()
+    await message.answer(text)
+
+
+async def ai_leads_text(conn: aiosqlite.Connection) -> str:
+    leads = await repository.get_recent_ai_assistable_leads(conn)
+    if not leads:
+        return (
+            "Пока нет лидов, помеченных как выполнимые с помощью ИИ. Критерии — "
+            "config/keywords.yaml -> ai_assistable."
+        )
+
+    lines = [f"🤖 Лиды, которые может закрыть ИИ ({len(leads)}):"]
+    for lead in leads:
+        amount = lead.budget_max if lead.budget_max is not None else lead.budget_min
+        budget = f"{amount} {lead.budget_currency or ''}".strip() if amount is not None else "бюджет не указан"
+        title = (lead.title or lead.text or "").strip()
+        if len(title) > 80:
+            title = title[:80].rstrip() + "..."
+        lines.append(f"[{lead.id}] {title} — {budget} ({lead.source_id})")
+    return "\n".join(lines)
+
+
+@router.message(Command("ai_leads"))
+async def cmd_ai_leads(message: Message, db_path: Path) -> None:
+    conn = await get_connection(db_path)
+    try:
+        text = await ai_leads_text(conn)
     finally:
         await conn.close()
     await message.answer(text)
@@ -416,6 +471,37 @@ async def cmd_template(message: Message, config_dir: Path) -> None:
         return
 
     await message.answer(str(template.get("text", "")).strip())
+
+
+def prompts_list_text(config_dir: Path) -> str:
+    prompts = load_prompts(config_dir)
+    if not prompts:
+        return "Промптов пока нет. Добавь их в config/prompts.yaml."
+
+    lines = [f"• {name} — {p.get('title', name)}" for name, p in prompts.items()]
+    return "Промпты для ИИ:\n" + "\n".join(lines) + "\n\nПолучить текст: /prompt <имя>"
+
+
+@router.message(Command("prompts"))
+async def cmd_prompts(message: Message, config_dir: Path) -> None:
+    await message.answer(prompts_list_text(config_dir))
+
+
+@router.message(Command("prompt"))
+async def cmd_prompt(message: Message, config_dir: Path) -> None:
+    parts = (message.text or "").split(maxsplit=1)[1:]
+    if not parts:
+        await message.answer("Использование: /prompt <имя>")
+        return
+
+    name = parts[0].strip()
+    prompts = load_prompts(config_dir)
+    prompt = prompts.get(name)
+    if prompt is None:
+        await message.answer(f"Промпт «{name}» не найден. Список: /prompts")
+        return
+
+    await message.answer(str(prompt.get("text", "")).strip())
 
 
 async def hh_status_text(conn: aiosqlite.Connection) -> str:

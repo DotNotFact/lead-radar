@@ -11,7 +11,7 @@ import pytest
 from src.core import repository
 from src.core.db import apply_migrations, get_connection
 from src.core.models import Lead
-from src.export.exporter import export_leads, fetch_export_rows
+from src.export.exporter import export_leads, fetch_export_rows, render_ai_handoff
 
 MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 
@@ -96,6 +96,59 @@ async def test_export_jsonl_is_well_formed(tmp_path: Path) -> None:
     record = json.loads(lines[0])
     assert record["source_id"] == "hh_ru"
     assert "author_handle" not in record
+
+
+@pytest.mark.asyncio
+async def test_fetch_export_rows_ai_assistable_only_filters_out_others(tmp_path: Path) -> None:
+    db_path = tmp_path / "test.db"
+    await apply_migrations(db_path, MIGRATIONS_DIR)
+    conn = await get_connection(db_path)
+    await repository.ensure_source(conn, "hh_ru", 1)
+    await repository.insert_lead(
+        conn,
+        Lead(
+            source_id="hh_ru", external_id="1", title="Простой парсер",
+            ai_assistable=True, collected_at=datetime.now(timezone.utc),
+        ),
+    )
+    await repository.insert_lead(
+        conn,
+        Lead(
+            source_id="hh_ru", external_id="2", title="Сложный проект",
+            ai_assistable=False, collected_at=datetime.now(timezone.utc),
+        ),
+    )
+    rows = await fetch_export_rows(conn, days=30, ai_assistable_only=True)
+    await conn.close()
+
+    assert len(rows) == 1
+    assert rows[0]["title"] == "Простой парсер"
+
+
+def test_render_ai_handoff_includes_intro_and_lead_fields() -> None:
+    rows = [
+        {
+            "source_id": "hh_ru",
+            "title": "Простой парсер",
+            "text": "Нужно распарсить сайт",
+            "url": "https://hh.ru/vacancy/1",
+            "budget_min": 10000,
+            "budget_max": 10000,
+            "budget_currency": "RUB",
+        }
+    ]
+    content = render_ai_handoff(rows, intro="Инструкция для ИИ.").decode("utf-8")
+
+    assert content.startswith("Инструкция для ИИ.")
+    assert "Лид 1 — hh_ru" in content
+    assert "Простой парсер" in content
+    assert "https://hh.ru/vacancy/1" in content
+    assert "10000 RUB" in content
+
+
+def test_render_ai_handoff_without_intro() -> None:
+    content = render_ai_handoff([{"source_id": "hh_ru", "title": "X"}], intro="").decode("utf-8")
+    assert content.startswith("### Лид 1")
 
 
 @pytest.mark.asyncio
