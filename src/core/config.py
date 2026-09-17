@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Вся конфигурация системы. Только из .env — никаких констант в коде."""
+    """Вся конфигурация системы. Только из .env - никаких констант в коде."""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

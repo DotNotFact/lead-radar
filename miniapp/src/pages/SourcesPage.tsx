@@ -6,8 +6,8 @@ import type { SourceStatus } from '../api/types'
 
 const SOURCE_LABELS: Record<string, string> = {
   hh_ru: 'hh.ru',
-  kwork_projects: 'Kwork — проекты',
-  kwork_catalog: 'Kwork — каталог',
+  kwork_projects: 'Kwork - проекты',
+  kwork_catalog: 'Kwork - каталог',
   remoteok: 'RemoteOK',
   freelancer: 'Freelancer.com',
   rss_remote_jobs: 'RSS (We Work Remotely)',

@@ -19,7 +19,7 @@ _STANDARD_RECORD_KEYS = {
 
 
 class JsonFormatter(logging.Formatter):
-    """Структурный лог в одну JSON-строку на запись. Никогда не пишет значения секретов —
+    """Структурный лог в одну JSON-строку на запись. Никогда не пишет значения секретов -
     вызывающий код обязан не класть их в extra."""
 
     def format(self, record: logging.LogRecord) -> str:
@@ -65,7 +65,7 @@ def setup_logging(log_dir: Path, level: str = "INFO") -> None:
 
 
 def log_source_degraded(source_id: str, reason: str) -> None:
-    """Единая точка логирования отказа источника — на неё смотрят при поиске проблем."""
+    """Единая точка логирования отказа источника - на неё смотрят при поиске проблем."""
     logging.getLogger(SOURCE_HEALTH_LOGGER).warning(
         "source_degraded", extra={"source_id": source_id, "reason": reason, "event": "source_degraded"}
     )

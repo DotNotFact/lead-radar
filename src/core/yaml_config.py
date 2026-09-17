@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 class SourceConfig(BaseModel):
     """Общие поля источника. Специфичные для коллектора поля (queries, base_url, chats, ...)
-    остаются доступны через model_extra — ядро их не типизирует."""
+    остаются доступны через model_extra - ядро их не типизирует."""
 
     model_config = ConfigDict(extra="allow")
 

@@ -91,7 +91,7 @@ async def sources_text(conn: aiosqlite.Connection) -> str:
         flag = "🟢" if source["enabled"] and not source["consecutive_failures"] else "🔴"
         lines.append(
             f"{flag} {source['id']} (tier {source['tier']}), "
-            f"ok: {source['last_ok_at'] or '—'}, ошибок подряд: {source['consecutive_failures']}"
+            f"ok: {source['last_ok_at'] or '-'}, ошибок подряд: {source['consecutive_failures']}"
         )
     return "\n".join(lines)
 
@@ -113,7 +113,7 @@ async def cmd_pause(message: Message, db_path: Path) -> None:
         await repository.set_system_state(conn, "collecting_paused", "1")
     finally:
         await conn.close()
-    await message.answer("Сбор лидов приостановлен. /resume — включить обратно.")
+    await message.answer("Сбор лидов приостановлен. /resume - включить обратно.")
 
 
 @router.message(Command("resume"))
@@ -283,7 +283,7 @@ async def ai_leads_text(conn: aiosqlite.Connection) -> str:
     leads = await repository.get_recent_ai_assistable_leads(conn)
     if not leads:
         return (
-            "Пока нет лидов, помеченных как выполнимые с помощью ИИ. Критерии — "
+            "Пока нет лидов, помеченных как выполнимые с помощью ИИ. Критерии - "
             "config/keywords.yaml -> ai_assistable."
         )
 
@@ -294,7 +294,7 @@ async def ai_leads_text(conn: aiosqlite.Connection) -> str:
         title = (lead.title or lead.text or "").strip()
         if len(title) > 80:
             title = title[:80].rstrip() + "..."
-        lines.append(f"[{lead.id}] {title} — {budget} ({lead.source_id})")
+        lines.append(f"[{lead.id}] {title} - {budget} ({lead.source_id})")
     return "\n".join(lines)
 
 
@@ -325,7 +325,7 @@ async def crm_text(conn: aiosqlite.Connection) -> str:
         next_touch = await repository.get_open_action_for_company(conn, company.id) if company.id else None
         due = f", след. касание: {next_touch.due_date}" if next_touch and next_touch.due_date else ""
         status_label = _COMPANY_STATUS_LABELS.get(company.status, company.status)
-        lines.append(f"[{company.id}] {company.name} — {status_label}{due}")
+        lines.append(f"[{company.id}] {company.name} - {status_label}{due}")
 
     if not lines:
         return "В CRM пока нет компаний. Добавить: /crm_add <название>"
@@ -356,7 +356,7 @@ async def cmd_crm_add(message: Message, db_path: Path) -> None:
         company_id = await crm_service.add_company(conn, name=name)
     finally:
         await conn.close()
-    await message.answer(f"Добавлено в CRM: [{company_id}] {name}. Первое касание — сегодня.")
+    await message.answer(f"Добавлено в CRM: [{company_id}] {name}. Первое касание - сегодня.")
 
 
 @router.message(Command("crm_touch"))
@@ -400,7 +400,7 @@ async def cmd_crm_status(message: Message, db_path: Path) -> None:
         await crm_service.set_company_status(conn, company_id, status)
     finally:
         await conn.close()
-    await message.answer(f"[{company_id}] — новый статус: {_COMPANY_STATUS_LABELS.get(status, status)}")
+    await message.answer(f"[{company_id}] - новый статус: {_COMPANY_STATUS_LABELS.get(status, status)}")
 
 
 @router.message(Command("income"))
@@ -447,7 +447,7 @@ def templates_list_text(config_dir: Path) -> str:
     if not templates:
         return "Шаблонов пока нет. Добавь их в config/templates.yaml."
 
-    lines = [f"• {name} — {tmpl.get('title', name)}" for name, tmpl in templates.items()]
+    lines = [f"• {name} - {tmpl.get('title', name)}" for name, tmpl in templates.items()]
     return "Доступные шаблоны:\n" + "\n".join(lines) + "\n\nПолучить текст: /template <имя>"
 
 
@@ -478,7 +478,7 @@ def prompts_list_text(config_dir: Path) -> str:
     if not prompts:
         return "Промптов пока нет. Добавь их в config/prompts.yaml."
 
-    lines = [f"• {name} — {p.get('title', name)}" for name, p in prompts.items()]
+    lines = [f"• {name} - {p.get('title', name)}" for name, p in prompts.items()]
     return "Промпты для ИИ:\n" + "\n".join(lines) + "\n\nПолучить текст: /prompt <имя>"
 
 
@@ -512,7 +512,7 @@ async def hh_status_text(conn: aiosqlite.Connection) -> str:
             ".env, синхронизация подтянет их автоматически; иначе см. "
             "python -m scripts.hh_oauth_login в README.md."
         )
-    lines = [f"• {a.vacancy_title or a.vacancy_id or a.id} — {a.state or '?'}" for a in applications]
+    lines = [f"• {a.vacancy_title or a.vacancy_id or a.id} - {a.state or '?'}" for a in applications]
     return "Отклики на hh.ru:\n" + "\n".join(lines)
 
 
@@ -536,9 +536,9 @@ async def settings_text(conn: aiosqlite.Connection, config_dir: Path, settings: 
     brief_time = await runtime_settings.get_daily_brief_time(conn, settings)
     return (
         "⚙️ Текущие настройки:\n"
-        f"• Порог уведомления: {threshold:.0f} — /set_threshold <число>\n"
-        f"• Мин. бюджет: {min_budget} ₽ — /set_budget_floor <число>\n"
-        f"• Время брифа: {brief_time} — /set_brief_time <ЧЧ:ММ>"
+        f"• Порог уведомления: {threshold:.0f} - /set_threshold <число>\n"
+        f"• Мин. бюджет: {min_budget} ₽ - /set_budget_floor <число>\n"
+        f"• Время брифа: {brief_time} - /set_brief_time <ЧЧ:ММ>"
     )
 
 

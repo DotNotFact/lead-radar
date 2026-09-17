@@ -15,7 +15,7 @@ def test_normalize_strips_urls_emoji_punctuation() -> None:
 def test_identical_after_normalization_same_hash() -> None:
     a = "Нужен C# разработчик, срочно! Пишите: @vasya"
     b = "нужен c# разработчик  срочно писите: @vasya"
-    # разный регистр и пунктуация, но одна и та же суть — normalize должен сблизить их
+    # разный регистр и пунктуация, но одна и та же суть - normalize должен сблизить их
     assert normalize_text(a) != normalize_text(b)  # опечатка "писите" ломает точное совпадение
     assert similarity_ratio(normalize_text(a), normalize_text(b)) > 0.85
 

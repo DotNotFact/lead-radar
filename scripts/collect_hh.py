@@ -114,7 +114,7 @@ async def main() -> None:
     if stats.get("disabled"):
         print("hh_ru отключён в config/sources.yaml (enabled: false)")
     elif stats.get("error"):
-        print("hh_ru недоступен — источник помечен degraded, см. логи")
+        print("hh_ru недоступен - источник помечен degraded, см. логи")
     else:
         print(
             f"Новых лидов: {stats['new']}, дублей(external_id): {stats['duplicates']}, "

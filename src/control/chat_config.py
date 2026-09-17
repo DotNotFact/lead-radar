@@ -6,7 +6,7 @@ import yaml
 
 _HEADER = (
     "# Чаты, добавленные через бот-команду /addchat.\n"
-    "# Основной список для массового заполнения (60-100 чатов) — config/sources.yaml "
+    "# Основной список для массового заполнения (60-100 чатов) - config/sources.yaml "
     "(telegram.chats).\n"
     "# Этот файл коллектор Telegram читает вместе с sources.yaml.\n"
 )

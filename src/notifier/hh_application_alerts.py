@@ -21,7 +21,7 @@ _STATE_LABELS = {
 def _format_change(app: HhApplication) -> str:
     label = _STATE_LABELS.get(app.state or "", app.state or "неизвестно")
     title = app.vacancy_title or app.vacancy_id or app.id
-    line = f"hh.ru: «{title}» — {label}"
+    line = f"hh.ru: «{title}» - {label}"
     if app.vacancy_url:
         line += f"\n{app.vacancy_url}"
     return line

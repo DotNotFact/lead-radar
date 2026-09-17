@@ -17,7 +17,7 @@ logger = logging.getLogger("lead_radar.notifier")
 async def send_lead_notification(
     bot: Bot, channel_id: int, lead: Lead, conn: aiosqlite.Connection
 ) -> None:
-    """Единственное место в системе, откуда лид уходит наружу — и только владельцу в его
+    """Единственное место в системе, откуда лид уходит наружу - и только владельцу в его
     приватный канал (инвариант 1: никакого автоматического контакта с заказчиком)."""
     if lead.id is None:
         raise ValueError("Lead должен быть сохранён в БД перед отправкой уведомления")
@@ -38,7 +38,7 @@ async def notify_pending_leads(
     bot: Bot, channel_id: int, conn: aiosqlite.Connection, threshold: float, limit: int = 50
 ) -> int:
     """Отправляет все ещё не отправленные лиды выше порога. Вызывается периодически из
-    планировщика (src/main.py). Ошибка на одном лиде не должна останавливать остальные —
+    планировщика (src/main.py). Ошибка на одном лиде не должна останавливать остальные -
     деградация вместо падения (инвариант 6)."""
     leads = await repository.get_unnotified_leads_above_threshold(conn, threshold, limit)
     sent = 0
