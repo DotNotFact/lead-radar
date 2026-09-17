@@ -21,7 +21,7 @@ _HOURLY_RE = re.compile(r"в\s*час|/\s*час|почасов", re.IGNORECASE)
 _NUMBER = r"\d[\d\s]*(?:[.,]\d+)?"
 
 _RANGE_RE = re.compile(
-    rf"(?:от\s*)?({_NUMBER})\s*(тыс\.?|к\b|k\b)?\s*(?:-|–|—|до)\s*({_NUMBER})\s*(тыс\.?|к\b|k\b)?",
+    rf"(?:от\s*)?({_NUMBER})\s*(тыс\.?|к\b|k\b)?\s*(?:-|–|-|до)\s*({_NUMBER})\s*(тыс\.?|к\b|k\b)?",
     re.IGNORECASE,
 )
 
@@ -59,7 +59,7 @@ def _detect_currency(text: str) -> str | None:
 
 
 def parse_budget(text: str | None) -> BudgetParseResult:
-    """Извлекает бюджет из свободного текста. Настраиваемых магических констант нет —
+    """Извлекает бюджет из свободного текста. Настраиваемых магических констант нет -
     список валютных обозначений задаётся в keywords.yaml (currency_symbols), сам парсер
     универсален по правилам ТЗ: диапазоны, сокращения тыс/к/k, почасовая ставка."""
     if not text:

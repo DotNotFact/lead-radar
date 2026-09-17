@@ -12,7 +12,7 @@ RawLeadHandler = Callable[[RawLead], Awaitable[None]]
 
 
 class TelegramClientLike(Protocol):
-    """Минимальный срез Telethon.TelegramClient, который использует коллектор — позволяет
+    """Минимальный срез Telethon.TelegramClient, который использует коллектор - позволяет
     подставлять фейковый клиент в тестах без реальной сессии/сети."""
 
     def iter_messages(
@@ -23,7 +23,7 @@ class TelegramClientLike(Protocol):
 
 
 class TelegramCollector:
-    """Коллектор Telegram. Клиент создаётся и подключается снаружи (src/main.py) —
+    """Коллектор Telegram. Клиент создаётся и подключается снаружи (src/main.py) -
     коллектор только читает, никогда не вступает в чаты и не пишет в них (инвариант 3)."""
 
     source_id = "telegram"
@@ -37,7 +37,7 @@ class TelegramCollector:
         self._last_error: str | None = None
 
     async def fetch(self, since: datetime) -> list[RawLead]:
-        """Догоняющий опрос истории — вызывается при старте, чтобы не потерять сообщения
+        """Догоняющий опрос истории - вызывается при старте, чтобы не потерять сообщения
         за время простоя."""
         leads: list[RawLead] = []
         for chat in self.chats:
@@ -56,7 +56,7 @@ class TelegramCollector:
 
     def register_realtime_handler(self, on_new_lead: RawLeadHandler) -> None:
         """Регистрирует обработчик новых сообщений в реальном времени. Импорт telethon.events
-        лениво — чтобы модуль был импортируемым (и тестируемым) без установленного telethon
+        лениво - чтобы модуль был импортируемым (и тестируемым) без установленного telethon
         в путях, где реальный клиент не нужен."""
         from telethon import events
 

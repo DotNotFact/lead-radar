@@ -13,7 +13,7 @@ DEFAULT_BACKOFF_BASE = 2.0
 
 
 class SourceUnavailableError(Exception):
-    """Источник недоступен после исчерпания ретраев — вызывающий код переводит источник в degraded."""
+    """Источник недоступен после исчерпания ретраев - вызывающий код переводит источник в degraded."""
 
 
 async def request_with_retry(

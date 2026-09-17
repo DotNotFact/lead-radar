@@ -100,7 +100,7 @@ def render_ai_handoff(rows: list[dict[str, Any]], intro: str = "") -> bytes:
     lines: list[str] = [intro.rstrip(), ""] if intro.strip() else []
 
     for i, row in enumerate(rows, start=1):
-        lines.append(f"### Лид {i} — {row['source_id']}")
+        lines.append(f"### Лид {i} - {row['source_id']}")
         if row.get("title"):
             lines.append(f"Заголовок: {row['title']}")
         if row.get("text"):

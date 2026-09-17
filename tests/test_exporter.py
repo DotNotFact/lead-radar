@@ -140,7 +140,7 @@ def test_render_ai_handoff_includes_intro_and_lead_fields() -> None:
     content = render_ai_handoff(rows, intro="Инструкция для ИИ.").decode("utf-8")
 
     assert content.startswith("Инструкция для ИИ.")
-    assert "Лид 1 — hh_ru" in content
+    assert "Лид 1 - hh_ru" in content
     assert "Простой парсер" in content
     assert "https://hh.ru/vacancy/1" in content
     assert "10000 RUB" in content

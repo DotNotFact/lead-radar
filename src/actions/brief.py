@@ -61,7 +61,7 @@ async def compose_daily_brief(conn: aiosqlite.Connection, today: date, threshold
         f"• собрано лидов: {stats['collected']}\n"
         f"• прошло порог ({threshold:.0f}+): {stats['above_threshold']}\n"
         f"• отвечено: {stats['replied']}\n"
-        f"• лучший источник: {stats['best_source'] or '—'}"
+        f"• лучший источник: {stats['best_source'] or '-'}"
     )
 
     sections.append(await format_income_line(conn, today))

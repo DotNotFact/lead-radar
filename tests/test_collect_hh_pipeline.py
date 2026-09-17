@@ -38,7 +38,7 @@ def _make_item(item_id: int) -> dict[str, Any]:
 @respx.mock
 async def test_full_pipeline_persists_100_plus_leads_with_parsed_budget(tmp_path: Path) -> None:
     """Замена живого гейта Фазы 1 (api.hh.ru недоступен из песочницы, см. чат): те же
-    объём и форма данных, что и в реальном ответе API, проходят через весь конвейер —
+    объём и форма данных, что и в реальном ответе API, проходят через весь конвейер -
     сбор -> парсинг бюджета -> скоринг -> дедуп -> запись в БД."""
     items_page0 = [_make_item(i) for i in range(100)]
     items_page1 = [_make_item(i) for i in range(100, 130)]

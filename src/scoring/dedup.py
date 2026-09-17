@@ -17,7 +17,7 @@ _WHITESPACE_RE = re.compile(r"\s+")
 
 
 def normalize_text(text: str) -> str:
-    """Нижний регистр, убраны ссылки, эмодзи, пунктуация, лишние пробелы — для сравнения
+    """Нижний регистр, убраны ссылки, эмодзи, пунктуация, лишние пробелы - для сравнения
     кросспостов одного и того же заказа в разных чатах."""
     lowered = text.lower()
     no_urls = _URL_RE.sub(" ", lowered)
@@ -59,5 +59,5 @@ def similarity_ratio(a: str, b: str) -> float:
 
 
 def is_near_duplicate(a: str, b: str, threshold: float = 0.9) -> bool:
-    """a, b — уже нормализованный текст (normalize_text)."""
+    """a, b - уже нормализованный текст (normalize_text)."""
     return similarity_ratio(a, b) >= threshold
